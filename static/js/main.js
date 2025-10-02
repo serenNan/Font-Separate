@@ -90,7 +90,15 @@ function displayResults(data) {
     let statsHtml = `
         <div class="stat-item">
             <div class="stat-number">${data.stats.table_count}</div>
-            <div class="stat-label">检测到的表格数量</div>
+            <div class="stat-label">表格区域</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number">${data.stats.handwritten_count}</div>
+            <div class="stat-label">手写体区域</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number">${data.stats.printed_count}</div>
+            <div class="stat-label">印刷体区域</div>
         </div>
     `;
 
@@ -108,12 +116,17 @@ function displayResults(data) {
 
     document.getElementById('stats').innerHTML = statsHtml;
 
-    // 设置图像
+    // 设置图像 - 表格分离结果
     document.getElementById('originalImg').src = data.original;
     document.getElementById('linesImg').src = data.lines;
-    document.getElementById('annotatedImg').src = data.annotated;
+    document.getElementById('annotatedImg').src = data.table_annotated;
     document.getElementById('tableImg').src = data.table;
     document.getElementById('nonTableImg').src = data.non_table;
+
+    // 设置图像 - 文字分类结果
+    document.getElementById('textAnnotatedImg').src = data.text_annotated;
+    document.getElementById('handwrittenImg').src = data.handwritten;
+    document.getElementById('printedImg').src = data.printed;
 
     // 显示结果区域
     results.style.display = 'block';

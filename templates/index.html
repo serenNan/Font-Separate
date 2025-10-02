@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Font-Separate - 文档表格分离系统</title>
+    <title>Font-Separate - 文档智能分离系统</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>📊 Font-Separate</h1>
-            <p>文档表格智能分离系统</p>
+            <p>文档智能分离系统 | 表格检测 + 手写体/印刷体分类</p>
         </header>
 
         <div class="upload-section">
@@ -69,6 +69,25 @@
                 <div class="image-card">
                     <h3>非表格内容</h3>
                     <img id="nonTableImg" alt="非表格内容">
+                </div>
+
+                <div class="image-card">
+                    <h3>文字分类标注</h3>
+                    <p class="legend">
+                        <span class="legend-item">🔴 手写体</span>
+                        <span class="legend-item">🔵 印刷体</span>
+                    </p>
+                    <img id="textAnnotatedImg" alt="文字分类标注">
+                </div>
+
+                <div class="image-card">
+                    <h3>手写体内容</h3>
+                    <img id="handwrittenImg" alt="手写体">
+                </div>
+
+                <div class="image-card">
+                    <h3>印刷体内容</h3>
+                    <img id="printedImg" alt="印刷体">
                 </div>
             </div>
 
