@@ -16,7 +16,7 @@ class TextClassifier:
 
     def preprocess(self, image_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        图像预处理
+        图像预处理 (增强版 - 适配模糊图像)
         Returns:
             original: 原始彩色图像
             gray: 灰度图
@@ -29,21 +29,42 @@ class TextClassifier:
         # 转灰度
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # 二值化 - 使用Otsu自动阈值
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        # 针对模糊图像的增强处理
+        # 1. 双边滤波 - 保留边缘同时去噪
+        denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+        # 2. 锐化增强 - 改善模糊
+        kernel_sharpen = np.array([[-1,-1,-1],
+                                   [-1, 9,-1],
+                                   [-1,-1,-1]])
+        sharpened = cv2.filter2D(denoised, -1, kernel_sharpen)
+
+        # 3. 对比度增强 - CLAHE自适应直方图均衡化
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(sharpened)
+
+        # 4. 二值化 - 使用自适应阈值(适合光照不均)
+        binary = cv2.adaptiveThreshold(
+            enhanced, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            blockSize=15,  # 局部窗口大小
+            C=8            # 常数调整
+        )
 
         return img, gray, binary
 
-    def extract_text_regions(self, binary: np.ndarray, min_area: int = 200) -> List[Dict]:
+    def extract_text_regions(self, binary: np.ndarray, min_area: int = 150) -> List[Dict]:
         """
-        提取文字区域
+        提取文字区域 (模糊图像优化版)
         Args:
             binary: 二值图
-            min_area: 最小区域面积(过滤噪点)
+            min_area: 最小区域面积
         Returns:
             文字区域列表 [{'bbox': (x,y,w,h), 'pixels': count}]
         """
-        # 使用连通组件分析找到文字区域
+        # 模糊图像不使用腐蚀,直接连通组件分析
+        # 使用8连通可以更好地连接断裂的笔画
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary, connectivity=8
         )
@@ -51,6 +72,8 @@ class TextClassifier:
         regions = []
         for i in range(1, num_labels):  # 跳过背景(0)
             area = stats[i, cv2.CC_STAT_AREA]
+
+            # 过滤噪点和过小区域
             if area < min_area:
                 continue
 
@@ -58,6 +81,19 @@ class TextClassifier:
             y = stats[i, cv2.CC_STAT_TOP]
             w = stats[i, cv2.CC_STAT_WIDTH]
             h = stats[i, cv2.CC_STAT_HEIGHT]
+
+            # 过滤过大区域(整行文字)
+            if w > 300 or h > 300:
+                continue
+
+            # 过滤过小区域
+            if w < 10 or h < 10:
+                continue
+
+            # 过滤长宽比极端异常的区域(横线、竖线等)
+            aspect_ratio = w / h if h > 0 else 0
+            if aspect_ratio > 8 or aspect_ratio < 0.1:
+                continue
 
             regions.append({
                 'bbox': (x, y, w, h),
@@ -146,35 +182,43 @@ class TextClassifier:
         circularity = features['circularity']
         density = features['density']
 
-        # 分类规则(基于经验阈值):
-        # 手写体: 笔画变化大(cv>0.3), 形状不规则(circularity<0.4)
-        # 印刷体: 笔画均匀(cv<0.25), 形状规整
+        # 分类规则(终极严格模式 - 默认全部印刷体):
+        # 只有同时满足笔画超大变化+极度不规则才判定为手写体
 
         handwritten_score = 0
 
-        # 笔画宽度变异系数
-        if stroke_cv > 0.35:
-            handwritten_score += 3
-        elif stroke_cv > 0.25:
-            handwritten_score += 1
+        # 笔画宽度变异系数 (终极阈值 - 只识别毛笔书法)
+        if stroke_cv > 0.80:
+            handwritten_score += 7  # 毛笔书法级别
+        elif stroke_cv > 0.70:
+            handwritten_score += 5  # 笔画变化超大
+        elif stroke_cv > 0.60:
+            handwritten_score += 2  # 笔画变化极大
         else:
-            handwritten_score -= 2
+            handwritten_score -= 5  # 默认强烈倾向印刷体
 
-        # 圆形度(不规则度)
-        if circularity < 0.3:
-            handwritten_score += 2
-        elif circularity < 0.5:
-            handwritten_score += 1
+        # 圆形度(不规则度) - 终极阈值
+        if circularity < 0.05:
+            handwritten_score += 6  # 毛笔书法级别不规则
+        elif circularity < 0.15:
+            handwritten_score += 4  # 极度不规则
+        elif circularity < 0.25:
+            handwritten_score += 2  # 很不规则
+        else:
+            handwritten_score -= 4  # 形状规整 → 印刷体
 
-        # 密度(手写体墨迹可能更浓)
-        if density > 0.4:
+        # 密度(墨迹浓度) - 终极阈值
+        if density > 0.75:
+            handwritten_score += 2  # 墨迹极浓
+        elif density > 0.65:
             handwritten_score += 1
 
         if self.debug:
             print(f"  特征: stroke_cv={stroke_cv:.3f}, circ={circularity:.3f}, "
                   f"density={density:.3f}, score={handwritten_score}")
 
-        return 'handwritten' if handwritten_score >= 2 else 'printed'
+        # 终极判定分数 (需要同时满足多个条件才能达到10分)
+        return 'handwritten' if handwritten_score >= 10 else 'printed'
 
     def merge_nearby_regions(self, regions: List[Dict],
                             binary: np.ndarray,
