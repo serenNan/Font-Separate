@@ -116,15 +116,9 @@ function displayResults(data) {
 
     document.getElementById('stats').innerHTML = statsHtml;
 
-    // 设置图像 - 表格分离结果
+    // 设置图像 - 只显示4张核心图片
     document.getElementById('originalImg').src = data.original;
-    document.getElementById('linesImg').src = data.lines;
-    document.getElementById('annotatedImg').src = data.table_annotated;
     document.getElementById('tableImg').src = data.table;
-    document.getElementById('nonTableImg').src = data.non_table;
-
-    // 设置图像 - 文字分类结果
-    document.getElementById('textAnnotatedImg').src = data.text_annotated;
     document.getElementById('handwrittenImg').src = data.handwritten;
     document.getElementById('printedImg').src = data.printed;
 
