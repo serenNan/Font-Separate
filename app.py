@@ -7,6 +7,7 @@ import os
 import cv2
 from werkzeug.utils import secure_filename
 from utils.table_detector import TableDetector
+from utils.text_classifier import TextClassifier
 import sys
 sys.path.append(os.path.dirname(__file__))
 import traceback

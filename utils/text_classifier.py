@@ -12,14 +12,16 @@ from typing import Dict, Tuple
 class TextClassifier:
     """文字分类器: 使用 EasyOCR + 位置分类区分手写体和印刷体"""
 
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, split_ratio=0.45):
         """
         初始化分类器
         Args:
             debug: 是否输出调试信息
+            split_ratio: 位置分界线比例 (0-1)，左侧=印刷，右侧=手写。默认 0.45
         """
         self.debug = debug
         self.reader = None  # 延迟初始化
+        self.split_ratio = split_ratio  # 位置分界线
 
     def _init_reader(self):
         """延迟初始化 EasyOCR (避免启动时加载)"""
@@ -69,8 +71,8 @@ class TextClassifier:
         if self.debug:
             print(f"✓ 检测到 {len(results)} 个文字区域")
 
-        # 4. 位置分类 (基于经验: 左侧=印刷表格, 右侧=手写批注)
-        split_x = w * 0.45  # 45% 分界线
+        # 4. 基于位置分类 (简单有效)
+        split_x = w * self.split_ratio  # 分界线位置
 
         handwritten_boxes = []
         printed_boxes = []
@@ -78,7 +80,6 @@ class TextClassifier:
         for i, (bbox, text, conf) in enumerate(results):
             points = np.array(bbox)
             center_x = np.mean(points[:, 0])
-            center_y = np.mean(points[:, 1])
 
             # 计算宽高比过滤异常框
             box_w = np.max(points[:, 0]) - np.min(points[:, 0])
@@ -96,19 +97,13 @@ class TextClassifier:
                 handwritten_boxes.append(bbox)
 
         if self.debug:
-            print(f"  印刷体区域（左侧）: {len(printed_boxes)} 个")
-            print(f"  手写体区域（右侧）: {len(handwritten_boxes)} 个")
+            print(f"  印刷体区域（规整）: {len(printed_boxes)} 个")
+            print(f"  手写体区域（歪斜）: {len(handwritten_boxes)} 个")
 
         # 5. 生成结果图
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
-
-        # 如果有表格掩码, 从二值图中去除表格区域
-        if table_mask is not None:
-            binary = cv2.bitwise_and(binary, cv2.bitwise_not(table_mask))
-
-        handwritten_mask = np.zeros_like(binary)
-        printed_mask = np.zeros_like(binary)
+        # 创建蒙版（用于提取区域）
+        handwritten_mask = np.zeros((h, w), dtype=np.uint8)
+        printed_mask = np.zeros((h, w), dtype=np.uint8)
         annotated = img.copy()
 
         # 绘制手写体（红色）
@@ -123,9 +118,9 @@ class TextClassifier:
             cv2.fillPoly(printed_mask, [points], 255)
             cv2.polylines(annotated, [points], True, (0, 255, 0), 2)
 
-        # 应用蒙版到二值图
-        handwritten_result = cv2.bitwise_and(binary, handwritten_mask)
-        printed_result = cv2.bitwise_and(binary, printed_mask)
+        # 应用蒙版到**原图**（保留彩色）
+        handwritten_result = cv2.bitwise_and(img, img, mask=handwritten_mask)
+        printed_result = cv2.bitwise_and(img, img, mask=printed_mask)
 
         # 6. 保存结果
         os.makedirs(output_dir, exist_ok=True)

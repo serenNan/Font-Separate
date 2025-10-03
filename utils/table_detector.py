@@ -11,8 +11,14 @@ import os
 class TableDetector:
     """表格检测器"""
 
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, use_simple_mode=True):
+        """
+        Args:
+            debug: 调试模式
+            use_simple_mode: 简单模式（直接按布局分离，不检测表格线）
+        """
         self.debug = debug
+        self.use_simple_mode = use_simple_mode
 
     def preprocess(self, image_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -41,28 +47,28 @@ class TableDetector:
             horizontal_lines: 水平线列表
             vertical_lines: 垂直线列表
         """
-        # 检测水平线
-        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
-        detect_horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=2)
+        # 检测水平线（大幅降低阈值以适应历史文档的模糊线条）
+        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))  # 减小核40→30
+        detect_horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)  # 减少迭代2→1
         horizontal_lines = cv2.HoughLinesP(
             detect_horizontal,
             rho=1,
             theta=np.pi/180,
-            threshold=100,
-            minLineLength=100,
-            maxLineGap=10
+            threshold=30,       # 大幅降低阈值 50→30
+            minLineLength=30,   # 降低最小长度 50→30
+            maxLineGap=30       # 增加允许间隙 20→30（连接断裂线条）
         )
 
         # 检测垂直线
-        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 40))
-        detect_vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=2)
+        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))  # 减小核40→30
+        detect_vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)  # 减少迭代2→1
         vertical_lines = cv2.HoughLinesP(
             detect_vertical,
             rho=1,
             theta=np.pi/180,
-            threshold=100,
-            minLineLength=100,
-            maxLineGap=10
+            threshold=30,       # 大幅降低阈值 50→30
+            minLineLength=30,   # 降低最小长度 50→30
+            maxLineGap=30       # 增加允许间隙 20→30
         )
 
         if self.debug:
@@ -182,16 +188,29 @@ class TableDetector:
         if density < 0.01 and component_count < 3:
             return 'empty_table'
 
-        # 标题框特征：
-        # 1. 密度很高（>0.15）且组件少（文字密集但内容少）
-        # 2. 横线很少（<=2）说明不是数据表格结构
-        if density > 0.15 and component_count < 50:
+        # 数据表格特征（优先判断）：
+        # 1. 竖线很多（>12）且组件很多（>300）→ 多列数据表格
+        if v_lines > 12 and component_count > 300:
+            return 'data_table'
+
+        # 2. 横线很多（>15）→ 多行表格
+        if h_lines > 15:
+            return 'data_table'
+
+        # 3. 横竖线都较多（横>8 且竖>15）
+        if h_lines > 8 and v_lines > 15:
+            return 'data_table'
+
+        # 标题框判断（注意：标题框也需要保留，只是名称叫title_box）
+        # 实际上所有带框线的区域都应该保留（表格+标题框）
+        # 真正要过滤的是：组件少且线条很少的纯手写批注区域
+
+        # 过滤条件：组件少（<100）且横线很少（<5）且竖线很少（<5）
+        # → 这是纯手写批注，没有明显的表格结构
+        if component_count < 100 and h_lines < 5 and v_lines < 5:
             return 'title_box'
 
-        if h_lines <= 2:
-            return 'title_box'
-
-        # 数据表格：有足够的横线形成行结构
+        # 默认当作数据表格（宽松策略，避免漏检）
         return 'data_table'
 
     def find_table_regions(self, h_lines: List, v_lines: List, img_shape: Tuple,
@@ -223,62 +242,77 @@ class TableDetector:
         if len(intersections) < 4:  # 至少需要4个交点才能形成表格
             return []
 
-        # 使用线条聚类来识别独立的表格区域
-        # 基于垂直线的x坐标进行聚类
+        # 使用间隙分析找到表格区域
+        # 1. 按垂直线的x坐标排序
         v_xs = sorted([v_line[0][0] for v_line in v_lines])
 
-        # 找到垂直线的间隙（大间隙表示不同表格区域）
-        v_gaps = []
+        # 2. 计算相邻垂直线之间的间隙
+        gaps = []
         for i in range(len(v_xs) - 1):
             gap = v_xs[i + 1] - v_xs[i]
-            if gap > 100:  # 间隙阈值：超过100像素认为是不同区域
-                v_gaps.append((v_xs[i], v_xs[i + 1]))
+            gaps.append((i, gap, v_xs[i], v_xs[i + 1]))
+
+        # 3. 找到最大间隙作为分界点（分隔不同区域）
+        if len(gaps) > 0:
+            # 按间隙大小排序
+            gaps_sorted = sorted(gaps, key=lambda x: x[1], reverse=True)
+
+            # 找到明显的大间隙（超过平均间隙的2倍）
+            avg_gap = sum(g[1] for g in gaps) / len(gaps)
+            large_gaps = [g for g in gaps_sorted if g[1] > avg_gap * 2 and g[1] > 80]
+
+            if self.debug and large_gaps:
+                print(f"发现 {len(large_gaps)} 个大间隙（平均间隙={avg_gap:.1f}px）")
+                for idx, gap, x1, x2 in large_gaps[:3]:
+                    print(f"  间隙 {idx}: {gap:.0f}px at x={x1:.0f}-{x2:.0f}")
+
+            # 根据大间隙分割区域
+            merged_regions = []
+            if large_gaps:
+                # 取第一个大间隙作为分界点
+                split_gap = large_gaps[0]
+                split_x = split_gap[3]  # 间隙结束位置
+
+                # 左侧区域（第一个大间隙之前）
+                left_v_xs = [x for x in v_xs if x < split_x]
+                if len(left_v_xs) >= 3:
+                    merged_regions.append((min(left_v_xs), max(left_v_xs), len(left_v_xs)))
+
+                # 右侧区域（第一个大间隙之后）
+                right_v_xs = [x for x in v_xs if x >= split_x]
+                if len(right_v_xs) >= 3:
+                    merged_regions.append((min(right_v_xs), max(right_v_xs), len(right_v_xs)))
+            else:
+                # 没有明显间隙，整个区域是一个表格
+                merged_regions.append((min(v_xs), max(v_xs), len(v_xs)))
+
+            if self.debug:
+                print(f"发现 {len(merged_regions)} 个表格区域")
+        else:
+            merged_regions = []
 
         tables = []
 
-        if len(v_gaps) == 0:
-            # 没有大间隙，整个区域是一个表格
-            table = self._create_table_from_lines(h_lines, v_lines, img_shape)
-            tables.append(table)
-        else:
-            # 有大间隙，分割成多个表格区域
-            # 左侧区域
-            left_v_lines = [v for v in v_lines if v[0][0] <= v_gaps[0][0]]
-            if len(left_v_lines) >= 2:
-                left_h_lines = self._filter_h_lines_for_region(
-                    h_lines, 0, v_gaps[0][0], img_shape
+        # 4. 为每个密集区域创建表格
+        for region_start, region_end, line_count in merged_regions:
+            # 提取该区域的垂直线
+            region_v_lines = [v for v in v_lines
+                            if region_start <= v[0][0] <= region_end]
+
+            if len(region_v_lines) >= 3:  # 至少3条垂直线
+                # 提取该区域的水平线
+                region_h_lines = self._filter_h_lines_for_region(
+                    h_lines, region_start, region_end, img_shape
                 )
-                if len(left_h_lines) >= 2:
+
+                if len(region_h_lines) >= 2:  # 至少2条水平线
                     table = self._create_table_from_lines(
-                        left_h_lines, left_v_lines, img_shape
+                        region_h_lines, region_v_lines, img_shape
                     )
                     tables.append(table)
-
-            # 中间区域（如果有多个间隙）
-            for i in range(len(v_gaps) - 1):
-                mid_v_lines = [v for v in v_lines
-                              if v_gaps[i][1] <= v[0][0] <= v_gaps[i + 1][0]]
-                if len(mid_v_lines) >= 2:
-                    mid_h_lines = self._filter_h_lines_for_region(
-                        h_lines, v_gaps[i][1], v_gaps[i + 1][0], img_shape
-                    )
-                    if len(mid_h_lines) >= 2:
-                        table = self._create_table_from_lines(
-                            mid_h_lines, mid_v_lines, img_shape
-                        )
-                        tables.append(table)
-
-            # 右侧区域
-            right_v_lines = [v for v in v_lines if v[0][0] >= v_gaps[-1][1]]
-            if len(right_v_lines) >= 2:
-                right_h_lines = self._filter_h_lines_for_region(
-                    h_lines, v_gaps[-1][1], img_shape[1], img_shape
-                )
-                if len(right_h_lines) >= 2:
-                    table = self._create_table_from_lines(
-                        right_h_lines, right_v_lines, img_shape
-                    )
-                    tables.append(table)
+                    if self.debug:
+                        print(f"  区域 [{region_start:.0f}, {region_end:.0f}]: "
+                              f"{len(region_v_lines)}条竖线, {len(region_h_lines)}条横线")
 
         # 如果提供了二值图，进行内容密度过滤
         if binary_img is not None and len(tables) > 0:
@@ -324,24 +358,33 @@ class TableDetector:
         filtered = []
         for h_line in h_lines:
             x1, y1, x2, y2 = h_line[0]
-            # 线条的中点在范围内，或者与范围有重叠
-            line_center = (x1 + x2) / 2
-            if x_min <= line_center <= x_max or (x1 <= x_max and x2 >= x_min):
+            # 只要线条有任何部分在x范围内就保留
+            if (x1 <= x_max and x2 >= x_min):  # 有重叠即可
                 filtered.append(h_line)
         return filtered
 
     def _create_table_from_lines(self, h_lines: List, v_lines: List, img_shape: Tuple) -> Dict:
         """从线条创建表格区域"""
-        h_ys = [h_line[0][1] for h_line in h_lines]
-        v_xs = [v_line[0][0] for v_line in v_lines]
+        # 收集垂直线的x坐标和水平线的y坐标
+        v_xs = [v_line[0][0] for v_line in v_lines]  # 只取x坐标（垂直线位置）
+        h_ys = [h_line[0][1] for h_line in h_lines]  # 只取y坐标（水平线位置）
 
+        # 同时收集垂直线的y范围和水平线的x范围
+        v_y_min = min([v_line[0][1] for v_line in v_lines])
+        v_y_max = max([v_line[0][3] for v_line in v_lines])
+        h_x_min = min([h_line[0][0] for h_line in h_lines])
+        h_x_max = max([h_line[0][2] for h_line in h_lines])
+
+        # x范围：取垂直线的min/max
         x_min = min(v_xs)
         x_max = max(v_xs)
+
+        # y范围：取水平线的min/max
         y_min = min(h_ys)
         y_max = max(h_ys)
 
-        # 添加边距
-        margin = 10
+        # 扩大边距以包含外框线条的宽度和可能遗漏的边缘
+        margin = 30  # 增加边距从10→30像素
         x_min = max(0, x_min - margin)
         y_min = max(0, y_min - margin)
         x_max = min(img_shape[1], x_max + margin)
@@ -365,9 +408,9 @@ class TableDetector:
         # 检测线条
         h_lines, v_lines = self.detect_lines(binary)
 
-        # 合并相近线条
-        h_lines_merged = self.merge_nearby_lines(h_lines, is_horizontal=True)
-        v_lines_merged = self.merge_nearby_lines(v_lines, is_horizontal=False)
+        # 合并相近线条（增加合并阈值，避免过度分割）
+        h_lines_merged = self.merge_nearby_lines(h_lines, is_horizontal=True, threshold=20)  # 5→20
+        v_lines_merged = self.merge_nearby_lines(v_lines, is_horizontal=False, threshold=20)  # 10→20
 
         if self.debug:
             print(f"合并后: {len(h_lines_merged)} 条水平线, {len(v_lines_merged)} 条垂直线")
@@ -420,9 +463,50 @@ class TableDetector:
                 x1, y1, x2, y2 = line[0]
                 cv2.line(lines_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
+        # 创建擦除线条后的图像
+        img_without_lines = original_img.copy()
+
+        # 擦除检测到的水平线
+        if h_lines_merged:
+            for line in h_lines_merged:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(img_without_lines, (x1, y1), (x2, y2), (255, 255, 255), 3)
+
+        # 擦除检测到的垂直线
+        if v_lines_merged:
+            for line in v_lines_merged:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(img_without_lines, (x1, y1), (x2, y2), (255, 255, 255), 3)
+
         # 提取区域
-        table_img = cv2.bitwise_and(original_img, original_img, mask=table_mask)
-        non_table_img = cv2.bitwise_and(original_img, original_img, mask=non_table_mask)
+        # 表格区域：使用原图，只保留表格框线部分（背景为白色）
+        table_img = np.ones_like(original_img) * 255  # 全白背景
+
+        # 使用原图的表格区域（带线条），并擦除文字
+        # 思路：原图 - 文字区域 = 只有线条
+        # 通过形态学操作去除文字，只保留表格线
+        table_roi = original_img.copy()
+        table_roi[table_mask == 0] = 255  # 非表格区域填白
+
+        # 转灰度进行形态学去文字操作
+        gray_roi = cv2.cvtColor(table_roi, cv2.COLOR_BGR2GRAY)
+        _, binary_roi = cv2.threshold(gray_roi, 200, 255, cv2.THRESH_BINARY)
+
+        # 提取表格线（横线+竖线）
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))
+
+        h_lines_img = cv2.morphologyEx(255 - binary_roi, cv2.MORPH_OPEN, h_kernel)
+        v_lines_img = cv2.morphologyEx(255 - binary_roi, cv2.MORPH_OPEN, v_kernel)
+
+        # 合并横竖线
+        lines_only = cv2.add(h_lines_img, v_lines_img)
+
+        # 转回三通道
+        table_img = cv2.cvtColor(255 - lines_only, cv2.COLOR_GRAY2BGR)
+
+        # 非表格区域：使用擦除线条后的图像（保留文字）
+        non_table_img = cv2.bitwise_and(img_without_lines, img_without_lines, mask=non_table_mask)
 
         # 保存
         os.makedirs(output_dir, exist_ok=True)
