@@ -479,31 +479,27 @@ class TableDetector:
                 cv2.line(img_without_lines, (x1, y1), (x2, y2), (255, 255, 255), 3)
 
         # 提取区域
-        # 表格区域：使用原图，只保留表格框线部分（背景为白色）
-        table_img = np.ones_like(original_img) * 255  # 全白背景
+        # 表格区域：提取线条框架，去除文字内容
+        table_img = original_img.copy()
+        table_img[table_mask == 0] = 255  # 非表格区域填白
 
-        # 使用原图的表格区域（带线条），并擦除文字
-        # 思路：原图 - 文字区域 = 只有线条
-        # 通过形态学操作去除文字，只保留表格线
-        table_roi = original_img.copy()
-        table_roi[table_mask == 0] = 255  # 非表格区域填白
+        # 转灰度并二值化
+        gray_table = cv2.cvtColor(table_img, cv2.COLOR_BGR2GRAY)
+        _, binary_table = cv2.threshold(gray_table, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-        # 转灰度进行形态学去文字操作
-        gray_roi = cv2.cvtColor(table_roi, cv2.COLOR_BGR2GRAY)
-        _, binary_roi = cv2.threshold(gray_roi, 200, 255, cv2.THRESH_BINARY)
+        # 使用中等核提取横线和竖线
+        # 核大小25-30在保留表格线和过滤文字笔画间取得平衡
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
 
-        # 提取表格线（横线+竖线）
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))
-        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))
-
-        h_lines_img = cv2.morphologyEx(255 - binary_roi, cv2.MORPH_OPEN, h_kernel)
-        v_lines_img = cv2.morphologyEx(255 - binary_roi, cv2.MORPH_OPEN, v_kernel)
+        h_lines_mask = cv2.morphologyEx(binary_table, cv2.MORPH_OPEN, h_kernel, iterations=1)
+        v_lines_mask = cv2.morphologyEx(binary_table, cv2.MORPH_OPEN, v_kernel, iterations=1)
 
         # 合并横竖线
-        lines_only = cv2.add(h_lines_img, v_lines_img)
+        lines_mask = cv2.add(h_lines_mask, v_lines_mask)
 
-        # 转回三通道
-        table_img = cv2.cvtColor(255 - lines_only, cv2.COLOR_GRAY2BGR)
+        # 转回BGR（反转黑白）
+        table_img = cv2.cvtColor(255 - lines_mask, cv2.COLOR_GRAY2BGR)
 
         # 非表格区域：使用擦除线条后的图像（保留文字）
         non_table_img = cv2.bitwise_and(img_without_lines, img_without_lines, mask=non_table_mask)
