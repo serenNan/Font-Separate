@@ -10,10 +10,28 @@
     <div class="container">
         <header>
             <h1>📊 Font-Separate</h1>
-            <p>文档智能分离系统 | 表格检测 + 手写体/印刷体分类</p>
+            <p>文档智能分离系统 | 表格检测 + 手写体/印刷体分类 + 颜色分类</p>
         </header>
 
         <div class="upload-section">
+            <div class="method-selection">
+                <h3>选择处理方法</h3>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="method" value="table" checked>
+                        <span>表格分离</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="method" value="text">
+                        <span>手写体/印刷体分类</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="method" value="color">
+                        <span>颜色分类</span>
+                    </label>
+                </div>
+            </div>
+
             <div class="upload-box" id="uploadBox">
                 <input type="file" id="fileInput" accept="image/*" style="display: none;">
                 <div class="upload-prompt">
@@ -38,30 +56,12 @@
 
             <div class="stats" id="stats"></div>
 
-            <div class="images-grid">
-                <div class="image-card">
-                    <h3>原始图像</h3>
-                    <img id="originalImg" alt="原始图像">
-                </div>
+            <div class="images-grid"></div>
 
-                <div class="image-card">
-                    <h3>表格内容</h3>
-                    <img id="tableImg" alt="表格内容">
-                </div>
-
-                <div class="image-card">
-                    <h3>手写体内容</h3>
-                    <img id="handwrittenImg" alt="手写体">
-                </div>
-
-                <div class="image-card">
-                    <h3>印刷体内容</h3>
-                    <img id="printedImg" alt="印刷体">
-                </div>
-            </div>
+            <div id="colorClusters" class="images-grid"></div>
 
             <div class="actions">
-                <button onclick="location.reload()" class="btn btn-primary">处理新图像</button>
+                <button onclick="resetUpload()" class="btn btn-primary">处理新图像</button>
             </div>
         </div>
 
