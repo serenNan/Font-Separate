@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-**Font-Separate** 是一个文档图像智能分离系统，实现双重处理流程：
+**Font-Separate** 是一个文档图像智能分离系统，实现多种处理流程：
 1. **表格分离**：基于 Hough 变换检测表格线，结合内容密度过滤空白表格和标题框
 2. **文字分类**：使用 EasyOCR 检测文字区域，基于位置策略区分手写体和印刷体
-3. **Web 界面**：Flask 单页应用，支持文件上传和结果可视化
+3. **颜色分类**（新）：自适应颜色聚类，根据文字实际颜色动态分类（无需预设固定颜色）
+4. **Web 界面**：Flask 单页应用，支持文件上传和结果可视化
 
 ## 技术栈
 
@@ -39,10 +40,13 @@ python app.py
 ### 测试
 ```bash
 # 方法1: 通过 Web 界面上传 Pictures/ 目录的样本图像
-# 方法2: 直接运行测试脚本（如果存在 test_classifier.py）
-python test_classifier.py
 
-# 样本图像特点（Pictures/1.jpg, 2.jpg, 3.jpg）:
+# 方法2: 运行独立脚本（无需启动 Flask）
+python classify_easyocr.py Pictures/原始.jpg      # EasyOCR 文字分类测试
+python advanced_denoise.py Pictures/原始.jpg      # 去噪算法测试
+python color_classify_demo.py Pictures/原始.jpg   # 颜色自适应分类（新）
+
+# 样本图像特点（Pictures/*.jpg）:
 # - 历史档案扫描件，包含表格 + 手写批注 + 印章
 # - 复杂布局：左侧印刷表格，右侧手写备注
 ```
@@ -50,19 +54,24 @@ python test_classifier.py
 ### 项目结构
 ```
 Font-Separate/
-├── app.py                    # Flask 主应用（双重处理流程：表格+文字分类）
+├── app.py                       # Flask 主应用（双重处理流程：表格+文字分类）
 ├── utils/
-│   ├── table_detector.py     # TableDetector：表格线检测与分离
-│   └── text_classifier.py    # TextClassifier：手写体/印刷体分类（EasyOCR）
+│   ├── table_detector.py        # TableDetector：表格线检测与分离
+│   ├── text_classifier.py       # TextClassifier：手写体/印刷体分类（EasyOCR）
+│   ├── color_classifier.py      # ColorClassifier：自适应颜色分类（新）
+│   └── text_extractor.py        # （辅助模块）
+├── classify_easyocr.py          # 独立脚本：EasyOCR 文字分类（无需 Flask）
+├── advanced_denoise.py          # 独立脚本：高级去噪算法（历史文书专用）
+├── color_classify_demo.py       # 独立脚本：颜色自适应分类（新）
+├── COLOR_CLASSIFICATION.md      # 颜色分类功能详细文档（新）
 ├── static/
-│   ├── css/style.css         # 前端样式
-│   └── js/main.js            # 文件上传和结果展示逻辑
+│   ├── css/style.css            # 前端样式
+│   └── js/main.js               # 文件上传和结果展示逻辑
 ├── templates/
-│   └── index.html            # 单页应用界面
-├── uploads/                  # 用户上传文件临时存储
-├── results/                  # 处理结果输出（8张图：表格+文字分类）
-├── Pictures/                 # 测试样本（历史文档扫描件）
-└── test_classifier.py        # 测试脚本（可选）
+│   └── index.html               # 单页应用界面
+├── uploads/                     # 用户上传文件临时存储
+├── results/                     # 处理结果输出
+└── Pictures/                    # 测试样本（历史文档扫描件）
 ```
 
 ## 核心架构
@@ -188,9 +197,42 @@ Font-Separate/
   - `separate_and_save()` 或 `classify_and_separate()` - 保存结果
 
 **前端修改**：
-- JavaScript 逻辑：`static/js/main.js`
-- CSS 样式：`static/css/style.css`
-- HTML 结构：`templates/index.html`
+- JavaScript：`static/js/main.js` - 文件上传和结果展示
+- CSS：`static/css/style.css` - 界面样式
+- HTML：`templates/index.html` - 页面结构
+
+**独立脚本说明**：
+- `classify_easyocr.py` - 独立的 EasyOCR 文字分类工具，可直接对单张图片进行处理
+- `advanced_denoise.py` - 历史文书专用去噪工具，通过连通组件分析区分文字和污渍
+- `color_classify_demo.py` - 颜色自适应分类工具（新），基于 K-Means 聚类自动识别不同颜色文字
+
+### 颜色分类功能（新增）
+
+**核心特点**：
+- 完全自适应，不预设固定颜色（如黑/蓝/红）
+- 自动确定最佳聚类数（2-6类）或手动指定
+- Lab 色彩空间聚类（更符合人类感知）
+- 排除背景像素，使用中位数颜色（鲁棒性强）
+
+**快速使用**：
+```bash
+# 自动检测颜色类别数
+python color_classify_demo.py Pictures/原始.jpg
+
+# 指定3个颜色类别
+python color_classify_demo.py Pictures/原始.jpg --n-clusters 3
+
+# 调试模式
+python color_classify_demo.py Pictures/原始.jpg --debug
+```
+
+**输出文件**：
+- `{basename}_color_annotated.jpg` - 标注图（不同边框颜色）
+- `{basename}_cluster_N.jpg` - 各颜色类别独立图像
+- `{basename}_color_palette.jpg` - 颜色代表色卡
+- `{basename}_color_stats.json` - 颜色统计信息
+
+**详细文档**：查看 `COLOR_CLASSIFICATION.md` 获取完整使用说明和技术原理
 
 ## 测试数据说明
 
