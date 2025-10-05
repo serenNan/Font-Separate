@@ -54,6 +54,14 @@ header p {
     display: flex;
     gap: 15px;
     flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+.new-image-controls {
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
 }
 
 .radio-label {
@@ -272,6 +280,45 @@ header p {
     background: #5568d3;
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #f5f5f5;
+    color: #333;
+    border: 2px solid #ddd;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+}
+
+.btn-secondary:hover {
+    background: #e8e8e8;
+    border-color: #667eea;
+    color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* 取消处理按钮样式（动态添加类） */
+.btn-cancel {
+    background: #fee !important;
+    color: #d32f2f !important;
+    border-color: #f44336 !important;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.btn-cancel:hover {
+    background: #fdd !important;
+    border-color: #d32f2f !important;
+    color: #b71c1c !important;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(244, 67, 54, 0);
+    }
 }
 
 .error {

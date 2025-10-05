@@ -30,6 +30,9 @@
                         <span>颜色分类</span>
                     </label>
                 </div>
+                <div class="new-image-controls">
+                    <button id="newImageBtn" class="btn btn-secondary" onclick="resetUpload()">处理新图片</button>
+                </div>
             </div>
 
             <div class="upload-box" id="uploadBox">
@@ -59,10 +62,6 @@
             <div class="images-grid"></div>
 
             <div id="colorClusters" class="images-grid"></div>
-
-            <div class="actions">
-                <button onclick="resetUpload()" class="btn btn-primary">处理新图像</button>
-            </div>
         </div>
 
         <div class="error" id="error" style="display: none;"></div>

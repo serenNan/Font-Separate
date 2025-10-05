@@ -12,6 +12,7 @@ from utils.color_classifier import ColorClassifier
 import sys
 sys.path.append(os.path.dirname(__file__))
 import traceback
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 最大16MB
@@ -62,6 +63,10 @@ def index():
 def upload_file():
     """处理文件上传、表格分离和手写体/印刷体分离"""
     try:
+        # 检测客户端是否断开连接
+        if request.environ.get('werkzeug.server.shutdown'):
+            print("⚠ 客户端已断开连接")
+            return jsonify({'error': '请求已取消'}), 499
         # 检查是否有文件
         if 'file' not in request.files:
             return jsonify({'error': '没有文件'}), 400
@@ -80,9 +85,16 @@ def upload_file():
         if not methods:
             methods = ['table', 'text', 'color']  # 默认全选
 
-        # 保存上传的文件
-        filename = secure_filename(file.filename)
+        # 保存上传的文件（添加时间戳确保文件名唯一）
+        original_filename = secure_filename(file.filename)
+        # 分离文件名和扩展名
+        name, ext = os.path.splitext(original_filename)
+        # 添加时间戳
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]  # 精确到毫秒前3位
+        filename = f"{name}_{timestamp}{ext}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        print(f"保存文件: {original_filename} -> {filename}")
         file.save(filepath)
 
         # 初始化检测器（首次使用时）
@@ -218,6 +230,12 @@ def upload_file():
         print(f"✓ 处理完成")
         return jsonify(response)
 
+    except BrokenPipeError:
+        print("⚠ 客户端已断开连接（BrokenPipeError）")
+        return jsonify({'error': '请求已取消'}), 499
+    except ConnectionResetError:
+        print("⚠ 客户端已重置连接（ConnectionResetError）")
+        return jsonify({'error': '请求已取消'}), 499
     except Exception as e:
         print(f"✗ 处理错误: {str(e)}")
         traceback.print_exc()

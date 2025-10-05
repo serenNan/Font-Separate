@@ -41,10 +41,10 @@ python app.py
 ```bash
 # 方法1: 通过 Web 界面上传 Pictures/ 目录的样本图像
 
-# 方法2: 运行独立脚本（无需启动 Flask）
-python classify_easyocr.py Pictures/原始.jpg      # EasyOCR 文字分类测试
-python advanced_denoise.py Pictures/原始.jpg      # 去噪算法测试
-python color_classify_demo.py Pictures/原始.jpg   # 颜色自适应分类（新）
+# 方法2: 运行独立测试脚本（无需启动 Flask）
+python classify_easyocr.py Pictures/原始.jpg            # EasyOCR 文字分类测试
+python advanced_denoise.py Pictures/原始.jpg            # 去噪算法测试
+python test_scripts/color_classify_demo.py Pictures/原始.jpg   # 颜色自适应分类
 
 # 样本图像特点（Pictures/*.jpg）:
 # - 历史档案扫描件，包含表格 + 手写批注 + 印章
@@ -54,16 +54,17 @@ python color_classify_demo.py Pictures/原始.jpg   # 颜色自适应分类（�
 ### 项目结构
 ```
 Font-Separate/
-├── app.py                       # Flask 主应用（双重处理流程：表格+文字分类）
+├── app.py                       # Flask 主应用（三重处理流程：表格+文字+颜色）
 ├── utils/
 │   ├── table_detector.py        # TableDetector：表格线检测与分离
 │   ├── text_classifier.py       # TextClassifier：手写体/印刷体分类（EasyOCR）
-│   ├── color_classifier.py      # ColorClassifier：自适应颜色分类（新）
+│   ├── color_classifier.py      # ColorClassifier：自适应颜色分类
 │   └── text_extractor.py        # （辅助模块）
-├── classify_easyocr.py          # 独立脚本：EasyOCR 文字分类（无需 Flask）
+├── test_scripts/
+│   └── color_classify_demo.py   # 独立脚本：颜色自适应分类
+├── classify_easyocr.py          # 独立脚本：EasyOCR 文字分类
 ├── advanced_denoise.py          # 独立脚本：高级去噪算法（历史文书专用）
-├── color_classify_demo.py       # 独立脚本：颜色自适应分类（新）
-├── COLOR_CLASSIFICATION.md      # 颜色分类功能详细文档（新）
+├── COLOR_CLASSIFICATION.md      # 颜色分类功能详细文档
 ├── static/
 │   ├── css/style.css            # 前端样式
 │   └── js/main.js               # 文件上传和结果展示逻辑
@@ -201,10 +202,10 @@ Font-Separate/
 - CSS：`static/css/style.css` - 界面样式
 - HTML：`templates/index.html` - 页面结构
 
-**独立脚本说明**：
+**独立测试脚本说明**：
 - `classify_easyocr.py` - 独立的 EasyOCR 文字分类工具，可直接对单张图片进行处理
 - `advanced_denoise.py` - 历史文书专用去噪工具，通过连通组件分析区分文字和污渍
-- `color_classify_demo.py` - 颜色自适应分类工具（新），基于 K-Means 聚类自动识别不同颜色文字
+- `test_scripts/color_classify_demo.py` - 颜色自适应分类工具，基于 K-Means 聚类自动识别不同颜色文字
 
 ### 颜色分类功能（新增）
 
@@ -217,13 +218,13 @@ Font-Separate/
 **快速使用**：
 ```bash
 # 自动检测颜色类别数
-python color_classify_demo.py Pictures/原始.jpg
+python test_scripts/color_classify_demo.py Pictures/原始.jpg
 
 # 指定3个颜色类别
-python color_classify_demo.py Pictures/原始.jpg --n-clusters 3
+python test_scripts/color_classify_demo.py Pictures/原始.jpg --n-clusters 3
 
 # 调试模式
-python color_classify_demo.py Pictures/原始.jpg --debug
+python test_scripts/color_classify_demo.py Pictures/原始.jpg --debug
 ```
 
 **输出文件**：
