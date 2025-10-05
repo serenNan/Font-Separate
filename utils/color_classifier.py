@@ -50,7 +50,7 @@ class ColorClassifier:
 
     def extract_text_color(self, roi: np.ndarray) -> Optional[np.ndarray]:
         """
-        从文字区域提取主色调（排除背景）
+        从文字区域提取主色调（直接使用原始RGB,不做预处理）
 
         Args:
             roi: 文字区域图像 (BGR)
@@ -61,28 +61,23 @@ class ColorClassifier:
         if roi.size == 0:
             return None
 
-        # 转灰度并二值化分离文字与背景
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-        # 提取文字像素
-        text_pixels = roi[mask > 0]
-
-        if len(text_pixels) == 0:
-            return None
+        # 直接将ROI所有像素转为RGB,不做任何预处理
+        all_pixels = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB).reshape(-1, 3)
 
         # 计算中位数颜色（比均值更鲁棒）
-        median_color = np.median(text_pixels, axis=0).astype(np.uint8)
+        median_color_rgb = np.median(all_pixels, axis=0).astype(np.uint8)
 
         # 转换到指定颜色空间
-        color_bgr = median_color.reshape(1, 1, 3)
+        color_rgb = median_color_rgb.reshape(1, 1, 3)
 
         if self.color_space == 'hsv':
+            color_bgr = cv2.cvtColor(color_rgb, cv2.COLOR_RGB2BGR)
             color_converted = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)[0, 0]
         elif self.color_space == 'lab':
+            color_bgr = cv2.cvtColor(color_rgb, cv2.COLOR_RGB2BGR)
             color_converted = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2Lab)[0, 0]
         else:  # rgb
-            color_converted = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)[0, 0]
+            color_converted = median_color_rgb
 
         return color_converted
 
