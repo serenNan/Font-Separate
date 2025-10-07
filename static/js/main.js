@@ -233,10 +233,6 @@ function displayResults(data) {
                 <h3>颜色分类标注</h3>
                 <img src="${data.color_annotated}" alt="颜色分类标注">
             </div>
-            <div class="image-card">
-                <h3>颜色色板</h3>
-                <img src="${data.color_palette}" alt="颜色色板">
-            </div>
         `;
     }
 

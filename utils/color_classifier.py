@@ -1,10 +1,9 @@
 """
-颜色分类器 - 基于自适应颜色聚类
-根据文档中实际出现的颜色动态分类，不预设固定颜色
+颜色分类器 - 基于网格聚类
+将图像分成小网格(~1mm×1mm),对每个网格内非白色像素取中位数颜色进行聚类
 """
 import cv2
 import numpy as np
-import easyocr
 import os
 from typing import Dict, List, Tuple, Optional
 from sklearn.cluster import KMeans
@@ -12,110 +11,28 @@ from sklearn.metrics import silhouette_score
 
 
 class ColorClassifier:
-    """自适应颜色分类器：基于 K-Means 聚类区分不同颜色的文字"""
+    """网格颜色分类器：基于网格聚类区分不同颜色"""
 
     def __init__(
         self,
         debug=False,
-        n_clusters: Optional[int] = None,
-        auto_k_range: Tuple[int, int] = (2, 6),
-        color_space: str = 'lab',
-        min_saturation: int = 10
+        white_threshold: int = 200,
+        grid_size: int = 20,
+        min_saturation: int = 30
     ):
         """
         初始化颜色分类器
 
         Args:
             debug: 是否输出调试信息
-            n_clusters: 指定聚类数（None=自动检测最佳值）
-            auto_k_range: 自动检测时的 K 值范围 (min, max)
-            color_space: 颜色空间 'rgb' | 'hsv' | 'lab' (推荐lab)
-            min_saturation: 最小饱和度阈值（过滤背景噪声）
+            white_threshold: 白色阈值(RGB≥此值为白色)
+            grid_size: 网格大小(像素),默认20x20像素(约1mm×1mm)
+            min_saturation: 彩色/灰色分界饱和度(HSV的S通道)
         """
         self.debug = debug
-        self.n_clusters = n_clusters
-        self.auto_k_range = auto_k_range
-        self.color_space = color_space.lower()
+        self.white_threshold = white_threshold
+        self.grid_size = grid_size
         self.min_saturation = min_saturation
-        self.reader = None  # 延迟初始化 EasyOCR
-
-    def _init_reader(self):
-        """延迟初始化 EasyOCR"""
-        if self.reader is None:
-            if self.debug:
-                print("初始化 EasyOCR（中文+英文）...")
-            self.reader = easyocr.Reader(['ch_sim', 'en'], gpu=False, verbose=False)
-            if self.debug:
-                print("✓ EasyOCR 初始化完成")
-
-    def extract_text_color(self, roi: np.ndarray) -> Optional[np.ndarray]:
-        """
-        从文字区域提取主色调（直接使用原始RGB,不做预处理）
-
-        Args:
-            roi: 文字区域图像 (BGR)
-
-        Returns:
-            颜色向量 (3维) 或 None（如果提取失败）
-        """
-        if roi.size == 0:
-            return None
-
-        # 直接将ROI所有像素转为RGB,不做任何预处理
-        all_pixels = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB).reshape(-1, 3)
-
-        # 计算中位数颜色（比均值更鲁棒）
-        median_color_rgb = np.median(all_pixels, axis=0).astype(np.uint8)
-
-        # 转换到指定颜色空间
-        color_rgb = median_color_rgb.reshape(1, 1, 3)
-
-        if self.color_space == 'hsv':
-            color_bgr = cv2.cvtColor(color_rgb, cv2.COLOR_RGB2BGR)
-            color_converted = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)[0, 0]
-        elif self.color_space == 'lab':
-            color_bgr = cv2.cvtColor(color_rgb, cv2.COLOR_RGB2BGR)
-            color_converted = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2Lab)[0, 0]
-        else:  # rgb
-            color_converted = median_color_rgb
-
-        return color_converted
-
-    def find_optimal_clusters(self, colors: np.ndarray) -> int:
-        """
-        使用轮廓系数法自动确定最佳聚类数
-
-        Args:
-            colors: 颜色向量数组 (N, 3)
-
-        Returns:
-            最佳聚类数 K
-        """
-        if len(colors) < self.auto_k_range[0]:
-            return min(len(colors), self.auto_k_range[0])
-
-        min_k, max_k = self.auto_k_range
-        max_k = min(max_k, len(colors))  # K 不能超过样本数
-
-        if self.debug:
-            print(f"正在自动检测最佳聚类数（范围 {min_k}-{max_k}）...")
-
-        scores = []
-        for k in range(min_k, max_k + 1):
-            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-            labels = kmeans.fit_predict(colors)
-            score = silhouette_score(colors, labels)
-            scores.append((k, score))
-            if self.debug:
-                print(f"  K={k}, 轮廓系数={score:.3f}")
-
-        # 选择得分最高的 K
-        best_k, best_score = max(scores, key=lambda x: x[1])
-
-        if self.debug:
-            print(f"✓ 最佳聚类数: K={best_k} (得分={best_score:.3f})")
-
-        return best_k
 
     def classify_by_color(self, image_path: str, output_dir: str) -> Dict:
         """
@@ -129,7 +46,7 @@ class ColorClassifier:
             结果字典 {
                 'n_clusters': int,
                 'clusters': {
-                    '0': {'count': int, 'color_rgb': [...], 'color_hsv': [...]},
+                    '0': {'count': int, 'grid_count': int, 'color_rgb': [...], 'description': str},
                     ...
                 },
                 'annotated_path': str,
@@ -137,156 +54,313 @@ class ColorClassifier:
                 'palette_path': str
             }
         """
-        # 1. 初始化 EasyOCR
-        self._init_reader()
+        if self.debug:
+            print(f"颜色聚类分类(白色阈值RGB≥{self.white_threshold}, 网格大小={self.grid_size}×{self.grid_size}像素)")
+            print("=" * 80)
 
-        # 2. 读取图像
+        # 1. 读取图像
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"无法读取图像: {image_path}")
 
         h, w = img.shape[:2]
-        if self.debug:
-            print(f"\n图片尺寸: {w}x{h}")
-
-        # 3. 检测文字
-        if self.debug:
-            print("正在检测文字...")
-        results = self.reader.readtext(image_path)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self.debug:
-            print(f"✓ 检测到 {len(results)} 个文字区域")
+            print(f"图片尺寸: {w}x{h}, 总像素: {h*w}")
 
-        # 4. 提取颜色特征
+        # 2. 将图像分成网格,每个网格取中位数颜色
         if self.debug:
-            print("\n提取文字颜色特征...")
+            print(f"将图像分成{self.grid_size}×{self.grid_size}像素的网格...")
 
-        colors = []
-        valid_boxes = []
-
-        for i, (bbox, text, conf) in enumerate(results):
-            points = np.array(bbox, dtype=np.int32)
-
-            # 计算宽高比过滤异常框（表格线残留）
-            box_w = np.max(points[:, 0]) - np.min(points[:, 0])
-            box_h = np.max(points[:, 1]) - np.min(points[:, 1])
-            aspect_ratio = box_w / max(box_h, 1)
-
-            if aspect_ratio > 5 or aspect_ratio < 0.2:
-                continue
-
-            # 提取 ROI
-            x_min = max(0, np.min(points[:, 0]))
-            y_min = max(0, np.min(points[:, 1]))
-            x_max = min(w, np.max(points[:, 0]))
-            y_max = min(h, np.max(points[:, 1]))
-
-            roi = img[y_min:y_max, x_min:x_max]
-
-            # 提取颜色
-            color = self.extract_text_color(roi)
-            if color is not None:
-                colors.append(color)
-                valid_boxes.append(bbox)
-
-        if len(colors) == 0:
-            raise ValueError("未检测到有效的文字颜色")
-
-        colors = np.array(colors)
+        grid_h = h // self.grid_size
+        grid_w = w // self.grid_size
 
         if self.debug:
-            print(f"✓ 提取到 {len(colors)} 个有效颜色特征")
+            print(f"网格数量: {grid_w}×{grid_h} = {grid_w * grid_h}个网格")
 
-        # 5. 颜色聚类
-        if self.n_clusters is None:
-            k = self.find_optimal_clusters(colors)
-        else:
-            k = min(self.n_clusters, len(colors))
+        grid_colors = []
+        grid_positions = []
+
+        for i in range(grid_h):
+            for j in range(grid_w):
+                y_start = i * self.grid_size
+                y_end = min((i + 1) * self.grid_size, h)
+                x_start = j * self.grid_size
+                x_end = min((j + 1) * self.grid_size, w)
+
+                # 提取网格区域
+                grid_region = img_rgb[y_start:y_end, x_start:x_end]
+
+                # 过滤掉白色像素(RGB≥white_threshold)
+                pixels = grid_region.reshape(-1, 3)
+                non_white_pixels = pixels[
+                    (pixels[:, 0] < self.white_threshold) |
+                    (pixels[:, 1] < self.white_threshold) |
+                    (pixels[:, 2] < self.white_threshold)
+                ]
+
+                # 如果网格内有足够的非白色像素,计算中位数颜色
+                if len(non_white_pixels) > 10:  # 至少10个非白色像素
+                    median_color = np.median(non_white_pixels, axis=0).astype(np.uint8)
+                    grid_colors.append(median_color)
+                    grid_positions.append((i, j))
+
+        grid_colors = np.array(grid_colors)
+
+        if self.debug:
+            print(f"提取了{len(grid_colors)}个非白色网格(已过滤网格内白色背景)")
+
+        if len(grid_colors) == 0:
+            raise ValueError("没有非白色网格!")
+
+        # 3. 转换为HSV(只使用色相H进行聚类)
+        if self.debug:
+            print("转换为HSV颜色空间...")
+
+        grids_bgr = cv2.cvtColor(grid_colors.reshape(1, -1, 3), cv2.COLOR_RGB2BGR)
+        hsv = cv2.cvtColor(grids_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+
+        # 只提取色相H (0-180度)
+        hues = hsv[:, 0].reshape(-1, 1)
+        saturations = hsv[:, 1]
+
+        # 过滤掉饱和度太低的灰色网格(S<min_saturation)
+        colored_mask = saturations >= self.min_saturation
+        colored_hues = hues[colored_mask]
+        colored_indices = np.where(colored_mask)[0]
+
+        if self.debug:
+            print(f"有色网格数: {len(colored_hues)} (饱和度≥{self.min_saturation})")
+            print(f"灰色网格数: {len(grid_colors) - len(colored_hues)} (饱和度<{self.min_saturation})")
+
+        # 4. 寻找最佳聚类数(基于色相)
+        if len(colored_hues) < 10:
             if self.debug:
-                print(f"\n使用指定聚类数: K={k}")
+                print("警告: 几乎没有彩色网格,可能都是黑/灰色")
+            # 降低饱和度阈值
+            colored_mask = saturations >= 10
+            colored_hues = hues[colored_mask]
+            colored_indices = np.where(colored_mask)[0]
+            if self.debug:
+                print(f"降低饱和度阈值到10后,有色网格数: {len(colored_hues)}")
+
+        # 采样
+        max_samples = 20000
+        if len(colored_hues) > max_samples:
+            if self.debug:
+                print(f"采样{max_samples}个有色网格进行聚类...")
+            sample_indices = np.random.choice(len(colored_hues), max_samples, replace=False)
+            samples = colored_hues[sample_indices]
+        else:
+            samples = colored_hues
 
         if self.debug:
-            print(f"\n执行 K-Means 聚类 (K={k}, 颜色空间={self.color_space})...")
+            print("\n寻找最佳聚类数(基于色相H,K=2-6)...")
 
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(colors)
-        centers = kmeans.cluster_centers_
+        best_k = 2
+        best_score = -1
+
+        for k in range(2, min(7, len(samples)//100 + 1)):
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            labels = kmeans.fit_predict(samples)
+            if len(np.unique(labels)) > 1:
+                score = silhouette_score(samples, labels)
+                if self.debug:
+                    print(f"  K={k}: silhouette={score:.3f}")
+                if score > best_score:
+                    best_score = score
+                    best_k = k
 
         if self.debug:
-            print("✓ 聚类完成")
+            print(f"\n最佳聚类数: K={best_k} (silhouette={best_score:.3f})")
 
-        # 6. 生成结果
+        # 5. 使用最佳K值聚类
+        if self.debug:
+            print("执行K-Means聚类(基于色相)...")
+
+        kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+        kmeans.fit(colored_hues)
+
+        # 聚类中心(色相)
+        hue_centers = kmeans.cluster_centers_.flatten().astype(int)
+
+        if self.debug:
+            print(f"\n聚类中心色相:")
+            for i, hue in enumerate(hue_centers):
+                print(f"  类别{i}: 色相H={hue}° (0=红, 60=黄, 120=绿, 180=青)")
+
+        # 6. 为所有有色网格分配类别
+        if self.debug:
+            print("\n为所有有色网格分配类别...")
+
+        colored_labels = kmeans.predict(colored_hues)
+
+        # 为所有网格分配类别(灰色先暂时单独一类)
+        labels_all = np.full(len(grid_colors), best_k, dtype=np.uint8)  # 默认灰色类
+        labels_all[colored_indices] = colored_labels
+
+        # 7. 对灰色类进行二次聚类(分为深灰和浅灰)
+        if self.debug:
+            print("\n对灰色/黑色网格进行二次聚类...")
+
+        gray_mask = ~colored_mask
+        gray_grids = grid_colors[gray_mask]
+        gray_indices = np.where(gray_mask)[0]
+
+        if len(gray_grids) > 10:
+            # 使用明度V进行聚类(区分深灰和浅灰)
+            gray_hsv = hsv[gray_mask]
+            gray_values = gray_hsv[:, 2].reshape(-1, 1)  # V通道(明度)
+
+            # 灰色分为2类
+            if self.debug:
+                print(f"  对{len(gray_grids)}个灰色网格按明度分为2类...")
+
+            gray_kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+            gray_labels = gray_kmeans.fit_predict(gray_values)
+
+            # 确定哪个是深色,哪个是浅色
+            gray_centers = gray_kmeans.cluster_centers_.flatten()
+            if gray_centers[0] < gray_centers[1]:
+                dark_gray_id = 0  # 深色
+                light_gray_id = 1  # 浅色
+            else:
+                dark_gray_id = 1
+                light_gray_id = 0
+
+            if self.debug:
+                print(f"    深灰明度: V={int(gray_centers[dark_gray_id])}")
+                print(f"    浅灰明度: V={int(gray_centers[light_gray_id])}")
+
+            # 更新labels_all(best_k=深灰, best_k+1=浅灰)
+            for i, idx in enumerate(gray_indices):
+                if gray_labels[i] == dark_gray_id:
+                    labels_all[idx] = best_k  # 深灰
+                else:
+                    labels_all[idx] = best_k + 1  # 浅灰
+
+            total_classes = best_k + 2  # 彩色类 + 深灰 + 浅灰
+        else:
+            total_classes = best_k + 1
+
+        # 8. 计算每个类别的代表颜色(取该类别网格的中位数RGB)
+        centers = []
+        for i in range(total_classes):
+            class_grids = grid_colors[labels_all == i]
+            if len(class_grids) > 0:
+                center_rgb = np.median(class_grids, axis=0).astype(np.uint8)  # 使用 uint8 而非 int 避免 CV_32S
+                centers.append(center_rgb)
+            else:
+                centers.append(np.array([128, 128, 128], dtype=np.uint8))
+
+        centers = np.array(centers)
+
+        if self.debug:
+            print(f"\n各类别代表颜色:")
+            for i, center in enumerate(centers):
+                hex_color = f"#{center[0]:02X}{center[1]:02X}{center[2]:02X}"
+                if i < best_k:
+                    print(f"  类别{i}(色相{hue_centers[i]}°): RGB{tuple(center)} = {hex_color}")
+                elif i == best_k:
+                    print(f"  类别{i}(深灰/黑色): RGB{tuple(center)} = {hex_color}")
+                else:
+                    print(f"  类别{i}(浅灰色): RGB{tuple(center)} = {hex_color}")
+
+        # 9. 生成分类图
+        if self.debug:
+            print("生成分类图...")
+
         os.makedirs(output_dir, exist_ok=True)
         base_name = os.path.splitext(os.path.basename(image_path))[0]
 
-        # 创建标注图和各类别掩码
+        # 从网格级别映射回像素级别
+        color_class_map = np.zeros((h, w), dtype=np.uint8)
+        for idx, (i, j) in enumerate(grid_positions):
+            y_start = i * self.grid_size
+            y_end = min((i + 1) * self.grid_size, h)
+            x_start = j * self.grid_size
+            x_end = min((j + 1) * self.grid_size, w)
+            color_class_map[y_start:y_end, x_start:x_end] = labels_all[idx] + 1
+
+        # 为每个类别生成独立图像(白色背景)
+        if self.debug:
+            print(f"\n生成{total_classes}个颜色类别的分离图像:")
+
+        cluster_paths = []
+        cluster_info = {}
+
+        for class_id in range(total_classes):
+            class_mask = (color_class_map == class_id + 1).astype(np.uint8) * 255
+
+            # 创建白色背景图像（使用 ones_like 而非 full_like 避免 dtype 冲突）
+            class_result = np.ones_like(img) * 255
+            # 只保留该类别的像素
+            class_result = cv2.bitwise_and(img, img, mask=class_mask, dst=class_result)
+            # 将非该类别区域设为白色
+            white_mask = (class_mask == 0).astype(np.uint8) * 255
+            class_result[white_mask == 255] = [255, 255, 255]
+
+            class_path = os.path.join(output_dir, f"{base_name}_cluster_{class_id}.jpg")
+            cv2.imwrite(class_path, class_result)
+            cluster_paths.append(class_path)
+
+            grid_count = np.sum(labels_all == class_id)
+            pixel_count = np.sum(color_class_map == class_id + 1)
+            center = centers[class_id]
+            hex_color = f"#{center[0]:02X}{center[1]:02X}{center[2]:02X}"
+            percentage = pixel_count / (h*w) * 100
+
+            # 描述
+            if class_id < best_k:
+                description = f"色相{hue_centers[class_id]}°"
+            elif class_id == best_k:
+                description = "深灰/黑色"
+            else:
+                description = "浅灰色"
+
+            # 计算HSV值
+            center_bgr = cv2.cvtColor(center.reshape(1, 1, 3), cv2.COLOR_RGB2BGR)[0, 0]
+            center_hsv = cv2.cvtColor(center_bgr.reshape(1, 1, 3), cv2.COLOR_BGR2HSV)[0, 0]
+
+            cluster_info[str(class_id)] = {
+                'count': int(pixel_count),
+                'grid_count': int(grid_count),
+                'color_rgb': center.tolist(),
+                'color_hsv': center_hsv.tolist(),
+                'description': description
+            }
+
+            if self.debug:
+                print(f"  类别{class_id}({description}): RGB{tuple(center)} ({hex_color})")
+                print(f"    网格数={grid_count}, 像素数={pixel_count} ({percentage:.2f}%) -> {class_path}")
+
+        # 10. 生成标注图(可选,显示网格边界)
         annotated = img.copy()
-        cluster_masks = [np.zeros((h, w), dtype=np.uint8) for _ in range(k)]
+        # 为每个类别生成不同颜色
+        cluster_colors = self._generate_distinct_colors(total_classes)
 
-        # 为每个聚类分配不同的边框颜色
-        cluster_colors = self._generate_distinct_colors(k)
+        for idx, (i, j) in enumerate(grid_positions):
+            y_start = i * self.grid_size
+            y_end = min((i + 1) * self.grid_size, h)
+            x_start = j * self.grid_size
+            x_end = min((j + 1) * self.grid_size, w)
 
-        cluster_counts = [0] * k
+            label = labels_all[idx]
+            color = cluster_colors[label]
+            cv2.rectangle(annotated, (x_start, y_start), (x_end, y_end), color, 1)
 
-        for bbox, label in zip(valid_boxes, labels):
-            points = np.array(bbox, dtype=np.int32)
-
-            # 填充掩码
-            cv2.fillPoly(cluster_masks[label], [points], 255)
-
-            # 绘制边框
-            cv2.polylines(annotated, [points], True, cluster_colors[label], 2)
-
-            cluster_counts[label] += 1
-
-        # 保存标注图
         annotated_path = os.path.join(output_dir, f"{base_name}_color_annotated.jpg")
         cv2.imwrite(annotated_path, annotated)
 
-        # 保存各类别图像
-        cluster_paths = []
-        for i in range(k):
-            cluster_result = cv2.bitwise_and(img, img, mask=cluster_masks[i])
-            cluster_path = os.path.join(output_dir, f"{base_name}_cluster_{i}.jpg")
-            cv2.imwrite(cluster_path, cluster_result)
-            cluster_paths.append(cluster_path)
-
-        # 7. 生成颜色统计
-        cluster_info = {}
-        for i in range(k):
-            # 转换聚类中心颜色到 RGB 和 HSV
-            center_color = centers[i].astype(np.uint8).reshape(1, 1, 3)
-
-            if self.color_space == 'lab':
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_Lab2BGR)[0, 0]
-            elif self.color_space == 'hsv':
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_HSV2BGR)[0, 0]
-            else:  # rgb
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_RGB2BGR)[0, 0]
-
-            center_rgb = cv2.cvtColor(center_bgr.reshape(1, 1, 3), cv2.COLOR_BGR2RGB)[0, 0]
-            center_hsv = cv2.cvtColor(center_bgr.reshape(1, 1, 3), cv2.COLOR_BGR2HSV)[0, 0]
-
-            cluster_info[str(i)] = {
-                'count': int(cluster_counts[i]),
-                'color_rgb': center_rgb.tolist(),
-                'color_hsv': center_hsv.tolist(),
-                'description': self._describe_color(center_hsv)
-            }
-
-        # 8. 生成颜色色板可视化
-        palette_path = self._generate_color_palette(centers, cluster_counts, output_dir, base_name)
+        # 11. 生成颜色色板
+        palette_path = self._generate_color_palette(centers, cluster_info, output_dir, base_name, best_k)
 
         if self.debug:
-            print("\n=== 颜色分类结果 ===")
-            for i in range(k):
-                info = cluster_info[str(i)]
-                print(f"类别 {i} ({info['description']}): {info['count']} 个区域")
-                print(f"  RGB: {info['color_rgb']}")
-                print(f"  HSV: {info['color_hsv']}")
+            print("\n✓ 完成")
 
         return {
-            'n_clusters': k,
+            'n_clusters': total_classes,
             'clusters': cluster_info,
             'annotated_path': annotated_path,
             'cluster_paths': cluster_paths,
@@ -303,50 +377,23 @@ class ColorClassifier:
             colors.append(tuple(map(int, bgr)))
         return colors
 
-    def _describe_color(self, hsv: np.ndarray) -> str:
-        """根据 HSV 值生成颜色描述"""
-        h, s, v = hsv
-
-        # 低饱和度 -> 黑白灰
-        if s < 30:
-            if v < 50:
-                return "black-like"
-            elif v > 200:
-                return "white-like"
-            else:
-                return "gray-like"
-
-        # 高饱和度 -> 彩色
-        if h < 10 or h > 170:
-            return "red-like"
-        elif 10 <= h < 25:
-            return "orange-like"
-        elif 25 <= h < 40:
-            return "yellow-like"
-        elif 40 <= h < 80:
-            return "green-like"
-        elif 80 <= h < 130:
-            return "blue-like"
-        elif 130 <= h < 170:
-            return "purple-like"
-        else:
-            return "unknown"
-
     def _generate_color_palette(
         self,
         centers: np.ndarray,
-        counts: List[int],
+        cluster_info: Dict,
         output_dir: str,
-        base_name: str
+        base_name: str,
+        n_colored: int
     ) -> str:
         """
         生成颜色色板可视化
 
         Args:
-            centers: 聚类中心 (K, 3)
-            counts: 各类别数量
+            centers: 聚类中心 RGB (K, 3)
+            cluster_info: 类别信息字典
             output_dir: 输出目录
             base_name: 基础文件名
+            n_colored: 彩色类别数
 
         Returns:
             色板图像路径
@@ -360,23 +407,21 @@ class ColorClassifier:
             y_start = i * 100
             y_end = (i + 1) * 100
 
-            # 转换颜色到 BGR
-            center_color = centers[i].astype(np.uint8).reshape(1, 1, 3)
-
-            if self.color_space == 'lab':
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_Lab2BGR)[0, 0]
-            elif self.color_space == 'hsv':
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_HSV2BGR)[0, 0]
-            else:  # rgb
-                center_bgr = cv2.cvtColor(center_color, cv2.COLOR_RGB2BGR)[0, 0]
+            # RGB转BGR
+            center_bgr = cv2.cvtColor(centers[i].reshape(1, 1, 3), cv2.COLOR_RGB2BGR)[0, 0]
 
             # 填充颜色块
             palette[y_start:y_end, :250] = center_bgr
 
             # 添加文本信息
-            text = f"Cluster {i}: {counts[i]} regions"
-            cv2.putText(palette, text, (260, y_start + 50),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            info = cluster_info[str(i)]
+            text = f"Class {i}: {info['grid_count']} grids"
+            cv2.putText(palette, text, (260, y_start + 40),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+            desc = info['description']
+            cv2.putText(palette, desc, (260, y_start + 65),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
         # 保存色板
         palette_path = os.path.join(output_dir, f"{base_name}_color_palette.jpg")

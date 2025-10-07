@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import easyocr
 import json
+from sklearn.cluster import KMeans
 
 def hex_to_hsv(hex_color):
     """将十六进制颜色转换为HSV"""
@@ -78,6 +79,92 @@ def classify_by_hue(image_path, target_hex='FFFFFF', hue_tolerance=15, min_satur
     print("\n" + "=" * 80)
     print(f"检测完成: 白色像素={white_count}/{total_pixels} ({white_ratio:.2f}%)")
     print(f"总计发现 {len(rgb_count)} 种不同的RGB颜色")
+
+    # 收集非白色像素进行颜色聚类
+    print("\n对非白色像素进行颜色聚类...")
+    non_white_colors = []
+    for (r, g, b), count in rgb_count.items():
+        if not is_white_pixel((r, g, b), threshold=200):
+            non_white_colors.extend([(r, g, b)] * min(count, 100))  # 限制每种颜色最多100个样本
+
+    print(f"非白色样本数: {len(non_white_colors)}")
+
+    if len(non_white_colors) > 0:
+        # K-Means聚类(自动确定最佳K值,2-8类)
+        non_white_array = np.array(non_white_colors)
+
+        best_k = 3
+        best_score = -1
+
+        print("寻找最佳聚类数...")
+        for k in range(2, min(9, len(non_white_colors))):
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            labels = kmeans.fit_predict(non_white_array)
+            from sklearn.metrics import silhouette_score
+            score = silhouette_score(non_white_array, labels)
+            print(f"  K={k}: silhouette={score:.3f}")
+            if score > best_score:
+                best_score = score
+                best_k = k
+
+        print(f"最佳聚类数: K={best_k} (silhouette={best_score:.3f})")
+
+        # 使用最佳K值进行聚类
+        kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+        kmeans.fit(non_white_array)
+
+        # 聚类中心
+        centers = kmeans.cluster_centers_.astype(int)
+        print(f"\n聚类中心颜色:")
+        for i, center in enumerate(centers):
+            hex_color = f"#{center[0]:02X}{center[1]:02X}{center[2]:02X}"
+            print(f"  类别{i}: RGB{tuple(center)} = {hex_color}")
+
+        # 构建RGB到类别的映射表(优化查找速度)
+        print("\n构建颜色分类映射表...")
+        rgb_to_class = {}
+        for (r, g, b) in rgb_count.keys():
+            if r >= 200 and g >= 200 and b >= 200:
+                rgb_to_class[(r, g, b)] = 0  # 白色
+            else:
+                pixel = np.array([r, g, b])
+                distances = [np.linalg.norm(pixel - center) for center in centers]
+                class_id = np.argmin(distances)
+                rgb_to_class[(r, g, b)] = class_id + 1
+
+        # 向量化分配类别
+        print("为图像像素分配颜色类别(优化算法)...")
+        color_class_map = np.zeros((h, w), dtype=np.uint8)
+
+        # 先分配白色
+        white_mask = (img_rgb[:,:,0] >= 200) & (img_rgb[:,:,1] >= 200) & (img_rgb[:,:,2] >= 200)
+        color_class_map[white_mask] = 0
+
+        # 对非白色像素批量分类
+        non_white_mask = ~white_mask
+        non_white_pixels = img_rgb[non_white_mask]
+
+        print(f"  对{len(non_white_pixels)}个非白色像素进行分类...")
+        # 使用kmeans.predict批量预测
+        labels = kmeans.predict(non_white_pixels) + 1  # +1因为0是白色
+
+        # 分配类别
+        color_class_map[non_white_mask] = labels
+
+        # 为每个类别生成独立图像
+        print(f"\n生成{best_k}个颜色类别的分离图像...")
+        for class_id in range(best_k):
+            class_mask = (color_class_map == class_id + 1).astype(np.uint8) * 255
+            class_result = cv2.bitwise_and(img, img, mask=class_mask)
+            class_path = os.path.join(output_dir, f"{base_name}_color_class_{class_id}.jpg")
+            cv2.imwrite(class_path, class_result)
+
+            pixel_count = np.sum(color_class_map == class_id + 1)
+            center = centers[class_id]
+            hex_color = f"#{center[0]:02X}{center[1]:02X}{center[2]:02X}"
+            print(f"  类别{class_id}: RGB{tuple(center)} ({hex_color}) - {pixel_count}像素 -> {class_path}")
+    else:
+        print("没有非白色像素,跳过聚类")
 
     # 生成结果图像
     os.makedirs(output_dir, exist_ok=True)

@@ -49,7 +49,7 @@ def init_detectors():
         print("文字分类器初始化完成")
     if color_classifier is None:
         print("正在初始化颜色分类器...")
-        color_classifier = ColorClassifier(debug=False, color_space='lab')
+        color_classifier = ColorClassifier(debug=False)
         print("颜色分类器初始化完成")
 
 
