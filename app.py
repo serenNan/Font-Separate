@@ -1,12 +1,11 @@
 """
 Font-Separate Web应用
-文档图像分离系统 - 表格分离 + 手写体/印刷体分离
+文档图像分离系统 - 手写体/印刷体分类 + 颜色分类
 """
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
 import cv2
 from werkzeug.utils import secure_filename
-from utils.table_detector import TableDetector
 from utils.text_classifier import TextClassifier
 from utils.color_classifier import ColorClassifier
 import sys
@@ -24,8 +23,7 @@ app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'bmp', 'tiff'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['RESULT_FOLDER'], exist_ok=True)
 
-# 初始化检测器
-table_detector = None
+# 初始化分类器
 text_classifier = None
 color_classifier = None
 
@@ -36,13 +34,9 @@ def allowed_file(filename):
         filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
-def init_detectors():
-    """延迟初始化检测器"""
-    global table_detector, text_classifier, color_classifier
-    if table_detector is None:
-        print("正在初始化表格检测器...")
-        table_detector = TableDetector(debug=False)
-        print("表格检测器初始化完成")
+def init_classifiers():
+    """延迟初始化分类器"""
+    global text_classifier, color_classifier
     if text_classifier is None:
         print("正在初始化文字分类器...")
         text_classifier = TextClassifier(debug=False)
@@ -61,7 +55,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """处理文件上传、表格分离和手写体/印刷体分离"""
+    """处理文件上传和分类"""
     try:
         # 检测客户端是否断开连接
         if request.environ.get('werkzeug.server.shutdown'):
@@ -81,9 +75,9 @@ def upload_file():
             return jsonify({'error': '不支持的文件格式'}), 400
 
         # 获取用户选择的处理方法
-        methods = request.form.getlist('methods[]')  # ['table', 'text', 'color']
+        methods = request.form.getlist('methods[]')  # ['text', 'color']
         if not methods:
-            methods = ['table', 'text', 'color']  # 默认全选
+            methods = ['text', 'color']  # 默认全选
 
         # 保存上传的文件（添加时间戳确保文件名唯一）
         original_filename = secure_filename(file.filename)
@@ -97,8 +91,8 @@ def upload_file():
         print(f"保存文件: {original_filename} -> {filename}")
         file.save(filepath)
 
-        # 初始化检测器（首次使用时）
-        init_detectors()
+        # 初始化分类器（首次使用时）
+        init_classifiers()
 
         base_name = os.path.splitext(filename)[0]
 
@@ -107,41 +101,21 @@ def upload_file():
         current_task = 0
 
         # 初始化结果
-        table_result = None
         text_result = None
         color_result = None
-        table_mask = None
 
-        # 1. 执行表格分离（如果选中）
-        if 'table' in methods:
-            current_task += 1
-            print(f"[{current_task}/{total_tasks}] 正在分离表格: {filename}")
-            table_result = table_detector.separate_and_save(
-                filepath,
-                app.config['RESULT_FOLDER']
-            )
-            print(f"  检测到 {table_result['table_count']} 个表格区域")
-
-            # 读取表格掩码(供文字分类使用)
-            table_mask_path = os.path.join(app.config['RESULT_FOLDER'], f"{base_name}_table.jpg")
-            table_mask = cv2.imread(table_mask_path, cv2.IMREAD_GRAYSCALE)
-            if table_mask is not None:
-                # 创建表格区域掩码(非零区域为表格)
-                _, table_mask = cv2.threshold(table_mask, 10, 255, cv2.THRESH_BINARY)
-
-        # 2. 执行手写体/印刷体分离（如果选中）
+        # 1. 执行手写体/印刷体分类（如果选中）
         if 'text' in methods:
             current_task += 1
             print(f"[{current_task}/{total_tasks}] 正在分类手写体和印刷体...")
             text_result = text_classifier.classify_and_separate(
                 filepath,
-                app.config['RESULT_FOLDER'],
-                table_mask=table_mask
+                app.config['RESULT_FOLDER']
             )
             print(f"  手写体={text_result['handwritten_count']}, "
                   f"印刷体={text_result['printed_count']}")
 
-        # 3. 执行颜色分类（如果选中）
+        # 2. 执行颜色分类（如果选中）
         if 'color' in methods:
             current_task += 1
             print(f"[{current_task}/{total_tasks}] 正在进行颜色分类...")
@@ -176,19 +150,6 @@ def upload_file():
             'methods': methods,  # 返回用户选择的方法
             'stats': {}
         }
-
-        # 添加表格分离结果
-        if table_result:
-            response.update({
-                'table': f'/results/{base_name}_table.jpg',
-                'non_table': f'/results/{base_name}_non_table.jpg',
-                'table_annotated': f'/results/{base_name}_table_annotated.jpg',
-                'lines': f'/results/{base_name}_lines.jpg',
-            })
-            response['stats'].update({
-                'table_count': table_result['table_count'],
-                'table_regions': table_result['table_regions']
-            })
 
         # 添加文字分类结果
         if text_result:
@@ -257,7 +218,7 @@ def result_file(filename):
 if __name__ == '__main__':
     print("=" * 60)
     print("Font-Separate 文档图像智能分离系统")
-    print("功能: 表格检测 + 手写体/印刷体分类 + 颜色分类")
+    print("功能: 手写体/印刷体分类 + 颜色分类")
     print("=" * 60)
     print("启动服务器...")
     print("访问地址: http://localhost:5000")

@@ -147,28 +147,6 @@ function displayResults(data) {
     // 设置统计信息
     let statsHtml = '';
 
-    // 表格统计
-    if (data.stats.table_count !== undefined) {
-        statsHtml += `
-            <div class="stat-item">
-                <div class="stat-number">${data.stats.table_count}</div>
-                <div class="stat-label">表格区域</div>
-            </div>
-        `;
-
-        // 添加每个表格的详细信息
-        if (data.stats.table_regions && data.stats.table_regions.length > 0) {
-            data.stats.table_regions.forEach((table, index) => {
-                statsHtml += `
-                    <div class="stat-item">
-                        <div class="stat-number">${table.h_lines} × ${table.v_lines}</div>
-                        <div class="stat-label">表格 ${index + 1} (行×列)</div>
-                    </div>
-                `;
-            });
-        }
-    }
-
     // 文字分类统计
     if (data.stats.handwritten_count !== undefined) {
         statsHtml += `
@@ -205,14 +183,6 @@ function displayResults(data) {
     `;
 
     // 根据选择的方法显示对应图像
-    if (data.table) {
-        imagesGrid.innerHTML += `
-            <div class="image-card">
-                <h3>表格内容</h3>
-                <img src="${data.table}" alt="表格内容">
-            </div>
-        `;
-    }
 
     if (data.handwritten) {
         imagesGrid.innerHTML += `
@@ -327,8 +297,8 @@ function resetUpload() {
         newImageBtn.textContent = '处理新图片';
         newImageBtn.classList.remove('btn-cancel');
 
-        // 重置为默认选项（表格分离）
-        document.querySelector('input[name="method"][value="table"]').checked = true;
+        // 重置为默认选项（手写体/印刷体分类）
+        document.querySelector('input[name="method"][value="text"]').checked = true;
 
         // 触发文件选择
         fileInput.click();
