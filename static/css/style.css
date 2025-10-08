@@ -37,78 +37,6 @@ header p {
     margin-bottom: 30px;
 }
 
-.method-selection {
-    background: white;
-    border-radius: 15px;
-    padding: 25px;
-    margin-bottom: 20px;
-}
-
-.method-selection h3 {
-    color: #333;
-    margin-bottom: 15px;
-    font-size: 1.3em;
-}
-
-.radio-group {
-    display: flex;
-    gap: 15px;
-    flex-wrap: wrap;
-    margin-bottom: 15px;
-}
-
-.new-image-controls {
-    display: flex;
-    justify-content: center;
-    padding-top: 10px;
-    border-top: 1px solid #eee;
-}
-
-.radio-label {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    font-size: 1.1em;
-    color: #555;
-    padding: 12px 20px;
-    border-radius: 10px;
-    border: 2px solid #ddd;
-    background: white;
-    transition: all 0.3s ease;
-    flex: 1;
-    min-width: 180px;
-    justify-content: center;
-}
-
-.radio-label:hover {
-    border-color: #667eea;
-    background: #f8f9ff;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.2);
-}
-
-.radio-label input[type="radio"] {
-    width: 20px;
-    height: 20px;
-    cursor: pointer;
-    accent-color: #667eea;
-}
-
-.radio-label input[type="radio"]:checked + span {
-    color: #667eea;
-    font-weight: 600;
-}
-
-.radio-label:has(input[type="radio"]:checked) {
-    border-color: #667eea;
-    background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-}
-
-.radio-label span {
-    user-select: none;
-}
-
 .upload-box {
     background: white;
     border-radius: 15px;
@@ -261,6 +189,13 @@ header p {
     text-align: center;
 }
 
+.result-actions {
+    text-align: center;
+    margin-top: 40px;
+    padding-top: 30px;
+    border-top: 2px solid #f0f0f0;
+}
+
 .btn {
     padding: 12px 30px;
     font-size: 1em;
@@ -272,14 +207,23 @@ header p {
 }
 
 .btn-primary {
-    background: #667eea;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
+    padding: 14px 40px;
+    font-size: 1.05em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .btn-primary:hover {
-    background: #5568d3;
+    background: linear-gradient(135deg, #5568d3 0%, #653a8e 100%);
     transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-primary svg {
+    flex-shrink: 0;
 }
 
 .btn-secondary {
@@ -300,16 +244,18 @@ header p {
 
 /* 取消处理按钮样式（动态添加类） */
 .btn-cancel {
-    background: #fee !important;
-    color: #d32f2f !important;
-    border-color: #f44336 !important;
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%) !important;
+    color: white !important;
+    border: none !important;
     animation: pulse 1.5s ease-in-out infinite;
 }
 
 .btn-cancel:hover {
-    background: #fdd !important;
-    border-color: #d32f2f !important;
-    color: #b71c1c !important;
+    background: linear-gradient(135deg, #ff5252 0%, #d32f2f 100%) !important;
+}
+
+.btn-cancel svg {
+    display: none !important;
 }
 
 @keyframes pulse {
@@ -346,11 +292,31 @@ footer {
         padding: 40px 20px;
     }
 
+    .upload-prompt svg {
+        width: 48px;
+        height: 48px;
+    }
+
+    .upload-prompt h3 {
+        font-size: 1.2em;
+    }
+
     .images-grid {
         grid-template-columns: 1fr;
     }
 
     .results {
         padding: 20px;
+    }
+
+    .btn-primary {
+        padding: 12px 30px;
+        font-size: 1em;
+        width: 100%;
+    }
+
+    .result-actions {
+        margin-top: 30px;
+        padding-top: 20px;
     }
 }

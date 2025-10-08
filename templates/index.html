@@ -10,27 +10,10 @@
     <div class="container">
         <header>
             <h1>📊 Font-Separate</h1>
-            <p>文档智能分离系统 | 手写体/印刷体分类 + 颜色分类</p>
+            <p>文档颜色分类系统</p>
         </header>
 
         <div class="upload-section">
-            <div class="method-selection">
-                <h3>选择处理方法</h3>
-                <div class="radio-group">
-                    <label class="radio-label">
-                        <input type="radio" name="method" value="text" checked>
-                        <span>手写体/印刷体分类</span>
-                    </label>
-                    <label class="radio-label">
-                        <input type="radio" name="method" value="color">
-                        <span>颜色分类</span>
-                    </label>
-                </div>
-                <div class="new-image-controls">
-                    <button id="newImageBtn" class="btn btn-secondary" onclick="resetUpload()">处理新图片</button>
-                </div>
-            </div>
-
             <div class="upload-box" id="uploadBox">
                 <input type="file" id="fileInput" accept="image/*" style="display: none;">
                 <div class="upload-prompt">
@@ -58,14 +41,20 @@
             <div class="images-grid"></div>
 
             <div id="colorClusters" class="images-grid"></div>
+
+            <div class="result-actions">
+                <button id="newImageBtn" class="btn btn-primary" onclick="resetUpload()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                    处理新图片
+                </button>
+            </div>
         </div>
 
         <div class="error" id="error" style="display: none;"></div>
     </div>
-
-    <footer>
-        <p>Powered by OpenCV | Made with ❤️</p>
-    </footer>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

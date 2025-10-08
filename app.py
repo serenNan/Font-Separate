@@ -1,12 +1,11 @@
 """
 Font-Separate Web应用
-文档图像分离系统 - 手写体/印刷体分类 + 颜色分类
+文档图像分离系统 - 颜色分类
 """
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
 import cv2
 from werkzeug.utils import secure_filename
-from utils.text_classifier import TextClassifier
 from utils.color_classifier import ColorClassifier
 import sys
 sys.path.append(os.path.dirname(__file__))
@@ -24,7 +23,6 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['RESULT_FOLDER'], exist_ok=True)
 
 # 初始化分类器
-text_classifier = None
 color_classifier = None
 
 
@@ -34,13 +32,9 @@ def allowed_file(filename):
         filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
-def init_classifiers():
+def init_classifier():
     """延迟初始化分类器"""
-    global text_classifier, color_classifier
-    if text_classifier is None:
-        print("正在初始化文字分类器...")
-        text_classifier = TextClassifier(debug=False)
-        print("文字分类器初始化完成")
+    global color_classifier
     if color_classifier is None:
         print("正在初始化颜色分类器...")
         color_classifier = ColorClassifier(debug=False)
@@ -74,11 +68,6 @@ def upload_file():
         if not allowed_file(file.filename):
             return jsonify({'error': '不支持的文件格式'}), 400
 
-        # 获取用户选择的处理方法
-        methods = request.form.getlist('methods[]')  # ['text', 'color']
-        if not methods:
-            methods = ['text', 'color']  # 默认全选
-
         # 保存上传的文件（添加时间戳确保文件名唯一）
         original_filename = secure_filename(file.filename)
         # 分离文件名和扩展名
@@ -92,38 +81,17 @@ def upload_file():
         file.save(filepath)
 
         # 初始化分类器（首次使用时）
-        init_classifiers()
+        init_classifier()
 
         base_name = os.path.splitext(filename)[0]
 
-        # 统计任务数
-        total_tasks = len(methods)
-        current_task = 0
-
-        # 初始化结果
-        text_result = None
-        color_result = None
-
-        # 1. 执行手写体/印刷体分类（如果选中）
-        if 'text' in methods:
-            current_task += 1
-            print(f"[{current_task}/{total_tasks}] 正在分类手写体和印刷体...")
-            text_result = text_classifier.classify_and_separate(
-                filepath,
-                app.config['RESULT_FOLDER']
-            )
-            print(f"  手写体={text_result['handwritten_count']}, "
-                  f"印刷体={text_result['printed_count']}")
-
-        # 2. 执行颜色分类（如果选中）
-        if 'color' in methods:
-            current_task += 1
-            print(f"[{current_task}/{total_tasks}] 正在进行颜色分类...")
-            color_result = color_classifier.classify_by_color(
-                filepath,
-                app.config['RESULT_FOLDER']
-            )
-            print(f"  检测到 {color_result['n_clusters']} 个颜色类别")
+        # 执行颜色分类
+        print("[1/1] 正在进行颜色分类...")
+        color_result = color_classifier.classify_by_color(
+            filepath,
+            app.config['RESULT_FOLDER']
+        )
+        print(f"  检测到 {color_result['n_clusters']} 个颜色类别")
 
         # 返回结果路径（相对路径）
         # 将 NumPy 类型转换为 Python 原生类型(解决 JSON 序列化问题)
@@ -147,31 +115,10 @@ def upload_file():
         response = {
             'success': True,
             'original': f'/uploads/{filename}',
-            'methods': methods,  # 返回用户选择的方法
-            'stats': {}
-        }
-
-        # 添加文字分类结果
-        if text_result:
-            response.update({
-                'handwritten': f'/results/{base_name}_handwritten.jpg',
-                'printed': f'/results/{base_name}_printed.jpg',
-                'text_annotated': f'/results/{base_name}_text_annotated.jpg',
-            })
-            response['stats'].update({
-                'handwritten_count': text_result['handwritten_count'],
-                'printed_count': text_result['printed_count']
-            })
-
-        # 添加颜色分类结果
-        if color_result:
-            response.update({
-                'color_annotated': f'/results/{base_name}_color_annotated.jpg',
-                'color_palette': f'/results/{base_name}_color_palette.jpg',
-                'color_clusters': [f'/results/{base_name}_cluster_{i}.jpg'
-                                  for i in range(color_result['n_clusters'])],
-            })
-            response['stats'].update({
+            'color_annotated': f'/results/{base_name}_color_annotated.jpg',
+            'color_clusters': [f'/results/{base_name}_cluster_{i}.jpg'
+                              for i in range(color_result['n_clusters'])],
+            'stats': {
                 'color_categories': color_result['n_clusters'],
                 'color_info': [
                     {
@@ -183,7 +130,8 @@ def upload_file():
                     }
                     for info in color_result['clusters'].values()
                 ]
-            })
+            }
+        }
 
         # 转换 NumPy 类型
         response['stats'] = convert_to_native(response['stats'])
@@ -218,7 +166,7 @@ def result_file(filename):
 if __name__ == '__main__':
     print("=" * 60)
     print("Font-Separate 文档图像智能分离系统")
-    print("功能: 手写体/印刷体分类 + 颜色分类")
+    print("功能: 颜色分类")
     print("=" * 60)
     print("启动服务器...")
     print("访问地址: http://localhost:5000")

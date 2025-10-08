@@ -27,14 +27,6 @@ fileInput.addEventListener('change', (e) => {
     }
 });
 
-// 监听单选框变化，自动重新处理
-document.querySelectorAll('input[name="method"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-        if (currentFile) {
-            handleFile(currentFile);
-        }
-    });
-});
 
 // 拖拽上传
 uploadBox.addEventListener('dragover', (e) => {
@@ -72,16 +64,8 @@ async function handleFile(file) {
         return;
     }
 
-    // 获取用户选择的处理方法（单选）
-    const selectedRadio = document.querySelector('input[name="method"]:checked');
-
-    if (!selectedRadio) {
-        showError('请选择一种处理方法');
-        return;
-    }
-
-    const method = selectedRadio.value;
-    console.log('使用处理方法:', method);
+    // 只有颜色分类功能
+    console.log('使用颜色分类');
 
     // 如果有正在进行的请求，先取消
     if (currentAbortController) {
@@ -92,21 +76,15 @@ async function handleFile(file) {
     // 创建新的 AbortController
     currentAbortController = new AbortController();
 
-    // 隐藏上传区，显示加载中（保留选项）
-    document.querySelector('.method-selection').style.display = 'block';
+    // 隐藏上传区和结果，显示加载中
     uploadBox.style.display = 'none';
     results.style.display = 'none';
     error.style.display = 'none';
     loading.style.display = 'block';
 
-    // 在加载时将按钮改为"取消处理"
-    newImageBtn.textContent = '取消处理';
-    newImageBtn.classList.add('btn-cancel');
-
     // 创建FormData
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('methods[]', method);  // 单选方法
 
     try {
         // 发送请求（带取消信号）
@@ -129,9 +107,6 @@ async function handleFile(file) {
         // 如果是主动取消，不显示错误
         if (err.name === 'AbortError') {
             console.log('请求已被取消');
-            // 恢复按钮文本和样式
-            newImageBtn.textContent = '处理新图片';
-            newImageBtn.classList.remove('btn-cancel');
             return;
         }
         showError(err.message);
@@ -145,31 +120,12 @@ async function handleFile(file) {
 // 显示结果
 function displayResults(data) {
     // 设置统计信息
-    let statsHtml = '';
-
-    // 文字分类统计
-    if (data.stats.handwritten_count !== undefined) {
-        statsHtml += `
-            <div class="stat-item">
-                <div class="stat-number">${data.stats.handwritten_count}</div>
-                <div class="stat-label">手写体区域</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number">${data.stats.printed_count}</div>
-                <div class="stat-label">印刷体区域</div>
-            </div>
-        `;
-    }
-
-    // 颜色分类统计
-    if (data.stats.color_categories !== undefined) {
-        statsHtml += `
-            <div class="stat-item">
-                <div class="stat-number">${data.stats.color_categories}</div>
-                <div class="stat-label">颜色类别</div>
-            </div>
-        `;
-    }
+    let statsHtml = `
+        <div class="stat-item">
+            <div class="stat-number">${data.stats.color_categories}</div>
+            <div class="stat-label">颜色类别</div>
+        </div>
+    `;
 
     document.getElementById('stats').innerHTML = statsHtml;
 
@@ -180,31 +136,11 @@ function displayResults(data) {
             <h3>原始图像</h3>
             <img src="${data.original}" alt="原始图像">
         </div>
+        <div class="image-card">
+            <h3>颜色分类标注</h3>
+            <img src="${data.color_annotated}" alt="颜色分类标注">
+        </div>
     `;
-
-    // 根据选择的方法显示对应图像
-
-    if (data.handwritten) {
-        imagesGrid.innerHTML += `
-            <div class="image-card">
-                <h3>手写体内容</h3>
-                <img src="${data.handwritten}" alt="手写体">
-            </div>
-            <div class="image-card">
-                <h3>印刷体内容</h3>
-                <img src="${data.printed}" alt="印刷体">
-            </div>
-        `;
-    }
-
-    if (data.color_annotated) {
-        imagesGrid.innerHTML += `
-            <div class="image-card">
-                <h3>颜色分类标注</h3>
-                <img src="${data.color_annotated}" alt="颜色分类标注">
-            </div>
-        `;
-    }
 
     // 动态添加颜色聚类图像
     const colorClustersDiv = document.getElementById('colorClusters');
@@ -229,10 +165,13 @@ function displayResults(data) {
         });
     }
 
-    // 显示结果区域，恢复按钮为"处理新图片"
+    // 显示结果区域
     results.style.display = 'block';
-    newImageBtn.textContent = '处理新图片';
-    newImageBtn.classList.remove('btn-cancel');
+
+    // 平滑滚动到结果区域
+    setTimeout(() => {
+        results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
 }
 
 // 显示错误
@@ -251,56 +190,28 @@ function resetUpload() {
     console.log('resetUpload 被调用');
     console.log('当前 currentFile:', currentFile ? currentFile.name : 'null');
 
-    // 检查当前是否正在处理（按钮显示"取消处理"）
-    const isProcessing = newImageBtn.textContent === '取消处理';
-    console.log('是否正在处理:', isProcessing);
-
-    if (isProcessing) {
-        // 如果正在处理，取消请求但保持当前图片
-        if (currentAbortController) {
-            currentAbortController.abort();
-            currentAbortController = null;
-            console.log('已取消当前处理');
-        }
-
-        // 恢复界面状态（保留当前图片）
-        loading.style.display = 'none';
-        uploadBox.style.display = 'none';
-
-        // 如果有之前的结果，显示结果；否则显示上传区
-        if (results.querySelector('.images-grid').children.length > 0) {
-            results.style.display = 'block';
-        } else {
-            uploadBox.style.display = 'block';
-        }
-
-        newImageBtn.textContent = '处理新图片';
-        newImageBtn.classList.remove('btn-cancel');
-    } else {
-        // 如果不是正在处理，打开文件选择对话框
-        // 取消可能存在的请求
-        if (currentAbortController) {
-            currentAbortController.abort();
-            currentAbortController = null;
-            console.log('已强制停止图像处理');
-        }
-
-        // 先清空 fileInput.value，确保即使选择同一文件也能触发 change 事件
-        fileInput.value = '';
-
-        // 重置状态（先清空 fileInput，再清空 currentFile）
-        currentFile = null;
-        results.style.display = 'none';
-        loading.style.display = 'none';
-        uploadBox.style.display = 'block';
-        error.style.display = 'none';
-        newImageBtn.textContent = '处理新图片';
-        newImageBtn.classList.remove('btn-cancel');
-
-        // 重置为默认选项（手写体/印刷体分类）
-        document.querySelector('input[name="method"][value="text"]').checked = true;
-
-        // 触发文件选择
-        fileInput.click();
+    // 取消可能存在的请求
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+        console.log('已取消当前处理');
     }
+
+    // 先清空 fileInput.value，确保即使选择同一文件也能触发 change 事件
+    fileInput.value = '';
+
+    // 重置状态
+    currentFile = null;
+    results.style.display = 'none';
+    loading.style.display = 'none';
+    uploadBox.style.display = 'block';
+    error.style.display = 'none';
+
+    // 平滑滚动到上传区
+    setTimeout(() => {
+        uploadBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+
+    // 触发文件选择
+    fileInput.click();
 }
