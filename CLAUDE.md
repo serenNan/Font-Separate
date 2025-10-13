@@ -4,19 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-**Font-Separate** 是一个文档图像智能分离系统,主要用于处理历史档案扫描件:
-- **表格分离** ✅ (85%准确度,可用) - 基于 Hough 变换检测表格线,结合内容密度过滤
-- **手写/印刷体分类** ⚠️ (60%准确度,需改进) - EasyOCR + 位置策略,依赖固定布局
-- **颜色分类** ❌ (不适用历史文档) - K-Means 聚类,仅适用于彩色现代文档
+**Font-Separate** 是一个文档图像颜色分类系统,基于网格聚类技术区分不同颜色的文字:
+- **当前功能**: 网格颜色分类 (基于 K-Means 聚类)
+- **已移除功能**: 表格分离、手写/印刷体分类 (2025-10-08 用户简化需求)
+- **适用场景**: 彩色现代文档 (黑/蓝/红笔区分,印章批注标记)
+- **不适用**: 历史文档 (墨迹褪色成灰色,饱和度<25)
 
-**技术栈**: Python 3.x + Flask 3.1 + OpenCV 4.6 + EasyOCR 1.7 + scikit-learn 1.7
+**技术栈**: Python 3.x + Flask 3.1 + OpenCV 4.6 + scikit-learn 1.7
 
 ## 核心命令
 
 ### 环境设置
 ```bash
-# 激活 conda 环境(项目使用 conda 管理)
-conda activate font-separate  # 或 base,或请求用户创建
+# 激活 conda 环境
+conda activate font-separate  # 或 base
 
 # 安装依赖
 pip install -r requirements.txt
@@ -24,345 +25,389 @@ pip install -r requirements.txt
 
 ### 运行应用
 ```bash
-# 启动 Flask 服务器(监听 0.0.0.0:5000)
+# 启动 Flask 服务器 (监听 0.0.0.0:5000)
 python app.py
 
-# 访问: http://localhost:5000
+# 访问 Web 界面
+# http://localhost:5000
 ```
 
 ### 独立测试脚本
 ```bash
-# 表格分离 + 手写体分类(集成测试,通过Web界面)
-# 访问 http://localhost:5000 上传 Pictures/原始.jpg
-
-# EasyOCR 文字分类(独立测试)
-python classify_easyocr.py Pictures/原始.jpg
-
-# 颜色自适应分类(独立测试,不推荐用于历史文档)
+# 网格颜色分类演示
 python test_scripts/color_classify_demo.py Pictures/原始.jpg
 
-# 历史文书去噪(辅助工具)
-python advanced_denoise.py Pictures/原始.jpg
+# 色相分类 (替代方案)
+python test_scripts/color_hue_classify.py Pictures/原始.jpg
+
+# 目标颜色提取
+python test_scripts/color_target_classify.py Pictures/原始.jpg
+
+# 原始颜色检查
+python test_scripts/inspect_raw_colors.py Pictures/原始.jpg
 ```
 
 ## 架构设计
 
-### 三重处理流程 (app.py:62-243)
+### 核心算法: 网格颜色聚类 (utils/color_classifier.py)
 
-**阶段1: 表格分离** (最成功的功能 ✅)
 ```python
-TableDetector (utils/table_detector.py)
-├── 1. 预处理 (23-41行): 灰度化 → Otsu 二值化
-├── 2. 线条检测 (43-79行): 形态学 + Hough 变换
-│   ├── 水平线核: (30,1) | 阈值30 | 最小长度30px | 最大间隙30px
-│   └── 垂直线核: (1,30) | 阈值30 | 最小长度30px | 最大间隙30px
-├── 3. 线条合并 (81-143行): 合并相近平行线(水平5px,垂直10px)
-├── 4. 区域识别 (204-342行): 交叉点聚类 + 垂直线间隙分割(>平均×2且>80px)
-└── 5. 内容密度过滤 (145-202行): 核心创新 ⭐
-    ├── 空白表格: density<0.01且组件<3 → 过滤
-    ├── 标题框: density>0.20且组件<30,或横线≤1且竖线≤3 → 过滤
-    └── 数据表格: 其他情况 → 保留
+ColorClassifier (430行)
+├── 1. 网格划分 (85-108行)
+│   └── 将图像分成 grid_size×grid_size 像素网格 (默认20×20,约1mm×1mm)
+├── 2. 网格颜色提取 (92-108行)
+│   ├── 过滤白色像素 (RGB≥white_threshold,默认200)
+│   ├── 计算每个网格的中位数颜色 (至少10个非白色像素)
+│   └── 输出: 网格颜色数组 (N_grids, 3)
+├── 3. HSV转换 + 饱和度过滤 (117-147行)
+│   ├── RGB → HSV,提取色相H (0-180度)
+│   ├── 过滤低饱和度网格 (S<min_saturation,默认30) → 灰色类
+│   └── 输出: 彩色网格 + 灰色网格
+├── 4. K-Means聚类 (彩色) (164-197行)
+│   ├── 自动确定最佳K值 (silhouette score, K=2-6)
+│   ├── 仅对色相H进行聚类
+│   └── 输出: 彩色类别标签 (K个)
+├── 5. 灰色二次聚类 (203-246行)
+│   ├── 按明度V分为2类 (深灰/浅灰)
+│   └── 输出: 总类别数 = K_colored + 2_gray
+├── 6. 结果生成 (270-368行)
+│   ├── 网格映射回像素级 (color_class_map)
+│   ├── 生成各类别独立图像 (白色背景)
+│   ├── 标注图 (网格边界,彩虹色)
+│   └── 颜色色板 (可视化)
 ```
 
-**阶段2: 手写/印刷体分类** (准确度有限 ⚠️)
-```python
-TextClassifier (utils/text_classifier.py)
-├── 1. EasyOCR 检测 (26-73行): 中英文模型,CPU模式
-├── 2. 位置分类 (74-101行):
-│   ├── 分界线: 图像宽度的45% (可调: split_ratio参数)
-│   ├── 左侧(<45%) → 印刷体(规整表格)
-│   └── 右侧(>45%) → 手写体(批注备注)
-└── 3. 异常过滤: 宽高比>5或<0.2(表格线残留)
+**核心创新**:
+- **网格聚类**: 解决像素级聚类计算量大的问题 (20×20网格 → 100倍加速)
+- **分层聚类**: 彩色(色相H) + 灰色(明度V) 分别处理,提高准确度
+- **自动K值**: silhouette score 自动确定最佳类别数,无需手动调参
 
-⚠️ 局限性:
-- 强依赖"左侧印刷+右侧手写"的固定布局
-- 无法处理混合布局文档
-- 历史文档中印刷/手写特征差异小,准确度仅60%
+### Web应用流程 (app.py)
+
+```python
+Flask App (175行)
+├── / (GET) → 渲染上传页面 (templates/index.html)
+├── /upload (POST) → 处理文件上传和分类 (50-151行)
+│   ├── 1. 文件验证 (58-69行)
+│   ├── 2. 保存文件 (71-81行, 添加时间戳防冲突)
+│   ├── 3. 延迟初始化分类器 (83-84行, 首次使用才加载)
+│   ├── 4. 执行颜色分类 (88-94行)
+│   ├── 5. NumPy类型转换 (98-112行, 解决JSON序列化)
+│   └── 6. 返回JSON响应 (114-140行)
+├── /uploads/<filename> (GET) → 提供上传文件 (154-157行)
+└── /results/<filename> (GET) → 提供结果文件 (160-163行)
+
+错误处理:
+- BrokenPipeError / ConnectionResetError → 499 (客户端取消)
+- 其他异常 → 500 + traceback
 ```
 
-**阶段3: 颜色分类** (历史文档不适用 ❌)
-```python
-ColorClassifier (utils/color_classifier.py)
-├── 1. EasyOCR 检测文字区域
-├── 2. 颜色提取 (51-87行): 二值化分离文字/背景,提取中位数颜色
-├── 3. 色彩空间转换: Lab(推荐)/HSV/RGB
-├── 4. K-Means 聚类 (89-143行): 自动确定K值(2-6)或手动指定
-└── 5. 结果生成: 各类别掩码 + 标注图 + 色板 + JSON统计
+### 前端界面 (templates/index.html + static/)
 
-❌ 历史文档问题:
-- 墨迹严重褪色,所有颜色退化成灰色(饱和度<25)
-- Otsu二值化对褪色文档失效,混入大量背景像素
-- 聚类结果无意义(RGB[175,166,158]浅灰vs[118,120,119]深灰)
-✅ 仅适用于彩色现代文档(黑/蓝/红笔区分印章批注)
+```
+单页应用设计:
+├── 上传区 (uploadBox) - 点击或拖拽上传
+├── 加载动画 (loading) - 旋转动画 + 提示文字
+├── 结果展示 (results)
+│   ├── 统计信息 (stats) - 类别数、颜色信息
+│   ├── 图像网格 (images-grid)
+│   │   ├── 原始图像
+│   │   ├── 标注图像 (网格边界)
+│   │   └── 颜色色板
+│   └── 颜色类别展示 (colorClusters)
+│       └── 各类别独立图像
+└── 重新上传按钮 (newImageBtn)
+
+交互特性:
+- 文件拖拽上传 (drag & drop)
+- 实时进度显示
+- 响应式布局
+- 错误提示
 ```
 
 ### 输出结果 (results/ 目录)
 
-**表格分离** (4个文件):
-- `*_table.jpg` - 表格内容
-- `*_non_table.jpg` - 非表格内容
-- `*_table_annotated.jpg` - 绿色框标注
-- `*_lines.jpg` - 红/蓝线条检测
+对于输入文件 `example.jpg`,输出以下文件:
 
-**文字分类** (3个文件):
-- `*_handwritten.jpg` - 手写体(红框)
-- `*_printed.jpg` - 印刷体(绿框)
-- `*_text_annotated.jpg` - 分类标注
-
-**颜色分类** (N+3个文件):
-- `*_color_annotated.jpg` - 彩虹色边框标注
-- `*_cluster_N.jpg` - 各类别独立图像
-- `*_color_palette.jpg` - 颜色色板
-- `*_color_stats.json` - JSON统计
+1. **`example_color_annotated.jpg`** - 标注图 (网格边界,彩虹色标记)
+2. **`example_cluster_0.jpg`** - 类别0独立图像 (白色背景)
+3. **`example_cluster_1.jpg`** - 类别1独立图像
+4. **`example_cluster_N.jpg`** - 类别N独立图像 (N=自动检测的类别数)
+5. **`example_color_palette.jpg`** - 颜色色板 (可视化各类别颜色)
 
 ## 关键参数调整
 
-### 表格检测不准确
-编辑 `utils/table_detector.py`:
+### 网格大小调整 (utils/color_classifier.py:20)
 ```python
-# 线条检测灵敏度(51,63,69行)
-threshold=30          # 降低→检测更多线条(当前已调低至30)
-minLineLength=30      # 降低→检测短线条
-maxLineGap=30         # 增大→连接断裂线条(历史文档专用)
-
-# 形态学核大小(51,63行)
-(30, 1) / (1, 30)     # 增大→检测更粗线条
-
-# 表格分割阈值(250行)
-gap > avg_gap*2 and gap > 80  # 避免误分割
-
-# 内容密度阈值(188-199行)
-density < 0.01        # 空白表格过滤
-density > 0.20        # 标题框过滤
+grid_size=20  # 网格大小(像素)
+# 降低 → 更精细,但计算量大
+# 增大 → 更快速,但精度降低
+# 推荐: 10-30像素 (分辨率300dpi → 0.8-2.5mm)
 ```
 
-### 手写体误判
-编辑 `utils/text_classifier.py`:
+### 白色阈值 (utils/color_classifier.py:19)
 ```python
-# 位置分界线(24行)
-split_ratio=0.45      # 调整为0.3-0.6,根据文档布局
-
-# 异常框过滤(90行)
-aspect_ratio > 5 or < 0.2  # 调整宽高比阈值
+white_threshold=200  # RGB≥此值为白色
+# 降低 → 保留更多浅色文字 (如淡彩色)
+# 增大 → 仅保留深色文字
+# 推荐: 180-220
 ```
 
-### 颜色分类(仅现代文档)
-编辑 `utils/color_classifier.py`:
+### 饱和度阈值 (utils/color_classifier.py:21)
 ```python
-# 聚类数(20行)
-n_clusters=3          # 手动指定类别数(None=自动)
+min_saturation=30  # 彩色/灰色分界(HSV的S通道)
+# 降低 → 更多低饱和度文字被识别为彩色 (历史文档适用)
+# 增大 → 更严格的彩色定义
+# 推荐: 10-50
+# 历史文档: 10 (墨迹饱和度<25)
+```
 
-# 颜色空间(22行)
-color_space='lab'     # lab(推荐)/hsv(彩色)/rgb(调试)
-
-# 饱和度阈值(23行)
-min_saturation=10     # 降低→保留更多低饱和度文字
+### 聚类数调整 (utils/color_classifier.py:164-173)
+当前为自动模式 (silhouette score, K=2-6)。若需手动指定:
+```python
+# 修改 classify_by_color() 方法
+best_k = 3  # 强制3个彩色类别
+# 跳过 for k in range(2, min(7, ...)) 循环
 ```
 
 ## 项目结构
 
 ```
-Font-Separate/
-├── app.py (266行)                    # Flask主应用,三重处理流程
+Font-Separate/feature/网页完善/
+├── app.py (175行)                    # Flask主应用
 ├── utils/
-│   ├── table_detector.py (471行)     # 表格检测(Hough变换+内容密度)✅
-│   ├── text_classifier.py (143行)    # 手写体分类(EasyOCR+位置)⚠️
-│   ├── color_classifier.py (390行)   # 颜色分类(K-Means聚类)❌
-│   └── text_extractor.py (294行)     # 辅助模块
-├── test_scripts/
-│   ├── color_classify_demo.py        # 颜色分类独立演示
-│   ├── brightness_classify_demo.py   # 亮度分类(颜色替代方案)
-│   └── historical_classify_demo.py   # 墨迹深度分类(历史文档)
-├── classify_easyocr.py (161行)       # EasyOCR独立测试
-├── advanced_denoise.py (238行)       # 历史文书去噪(连通组件分析)
+│   ├── color_classifier.py (430行)   # 网格颜色分类 (核心)
+│   ├── table_detector.py (471行)     # [已废弃] 表格检测
+│   ├── text_classifier.py (143行)    # [已废弃] 手写体分类
+│   └── text_extractor.py (294行)     # [辅助模块]
+├── test_scripts/                     # 独立测试脚本
+│   ├── color_classify_demo.py        # 网格颜色分类演示
+│   ├── color_hue_classify.py         # 色相分类
+│   ├── color_target_classify.py      # 目标颜色提取
+│   ├── color_hue_range_classify.py   # 色相范围分类
+│   ├── color_cluster.py              # 聚类分析
+│   └── inspect_raw_colors.py         # 原始颜色检查
 ├── static/
 │   ├── css/style.css                 # 前端样式
-│   └── js/main.js                    # 文件上传+结果展示
+│   └── js/main.js                    # 文件上传 + 结果展示
 ├── templates/
 │   └── index.html                    # 单页应用
-├── Pictures/                         # 测试样本(历史档案扫描件)
+├── Pictures/                         # 测试样本
 ├── uploads/                          # 用户上传临时目录
-└── results/                          # 处理结果输出
+├── results/                          # 处理结果输出
+└── docs/                            # 项目文档
+    ├── 开发历程文档.md               # 完整开发历程
+    └── 要求.md                      # 原始需求
 ```
-
-## 核心算法深度解析
-
-### 1. 表格检测核心创新: 内容密度过滤 ⭐
-```python
-# utils/table_detector.py:145-202
-def calculate_content_density(region):
-    """
-    解决问题: 初版只检测线条,误判大量空白表格/标题框
-
-    核心思路:
-    1. 计算黑色像素密度(density = black_pixels / total_area)
-    2. 统计连通组件数量(cv2.connectedComponents)
-    3. 统计横竖线数量
-
-    分类规则:
-    - 空白表格: density < 0.01 且 components < 3  → 过滤
-    - 标题框: (density > 0.20 且 components < 30) 或
-              (h_lines ≤ 1 且 v_lines ≤ 3)        → 过滤
-    - 数据表格: 其他情况                          → 保留
-    """
-    # 实际效果: 准确度从50%提升到85% ✅
-```
-
-### 2. 手写体分类失败历程 (开发历程文档:126-234行)
-
-**尝试1: 形态学特征分类** (提交17bdfad,失败❌)
-```python
-# 笔画宽度变异系数 + 圆形度 + 像素密度
-准确度: 30-40%
-失败原因:
-- 历史文档模糊,特征不稳定
-- 印刷/手写差异小
-- 调到"毛笔书法级别"(CV>0.80)依然误判
-```
-
-**尝试2: EasyOCR + 位置分类** (提交9e0286e,勉强⚠️)
-```python
-# 代码从321行简化到93行
-split_x = w * 0.45  # 分界线
-center_x < split_x → 印刷体(左侧表格)
-center_x > split_x → 手写体(右侧批注)
-
-准确度: 60%
-局限性:
-- 强依赖"左印刷+右手写"布局
-- 无法泛化到混合布局
-- 需要手动调整分界线
-```
-
-**结论**: 传统方法无法解决,需要深度学习(CNN/Transformer)或人工标注
-
-### 3. 颜色分类三次失败 (开发历程文档:625-664行)
-
-**尝试1: 颜色聚类** (提交f33d67f,失败❌)
-```python
-问题: 历史文档墨迹褪色成灰色
-实测: 3个类别都是gray-like,饱和度仅4-25
-RGB[175,166,158]浅灰 vs [118,120,119]深灰 vs [186,187,183]浅灰
-准确度: 15%
-```
-
-**尝试2: 亮度分类** (失败❌)
-```python
-问题: 墨迹已严重褪色,亮度范围93-221
-准确度: 40%
-```
-
-**尝试3: 墨迹深度分类** (失败❌)
-```python
-固定阈值180 + 腐蚀操作
-问题: 漏检率70%(只检测到26/89个区域)
-准确度: 50%(但实际可用性差)
-```
-
-**结论**: 对历史文档完全不适用,仅适用彩色现代文档
 
 ## 常见问题
 
-### 1. 表格检测遗漏
-```bash
-# 降低Hough变换阈值(当前已调至30,历史文档专用)
-utils/table_detector.py:57,69行 threshold=30
-
-# 增大maxLineGap连接断裂线条(当前已调至30)
-utils/table_detector.py:59,71行 maxLineGap=30
-```
-
-### 2. 手写体误判严重
-```bash
-# 调整位置分界线(默认45%)
-utils/text_classifier.py:24行 split_ratio=0.45
-
-# 根据实际文档布局调整:
-# - 左侧宽表格 → 降低至0.3-0.4
-# - 右侧宽批注 → 提高至0.5-0.6
-```
-
-### 3. EasyOCR 初始化慢
+### 1. 类别数检测不准确
 ```python
-# 延迟初始化(已实现)
-app.py:43-53行: 首次上传时才加载模型(3-5秒)
-启动时间: <1秒
+# 问题: 自动检测K值不理想
+# 解决: 手动指定K值
 
-# 启用GPU加速(可选)
-utils/text_classifier.py:31行: gpu=True (需要CUDA)
+# 修改 utils/color_classifier.py:164行
+best_k = 3  # 强制3个彩色类别
+# 注释掉 for k in range(2, min(7, ...)) 循环
 ```
 
-### 4. 内存溢出
+### 2. 历史文档颜色分类失败
 ```python
-# 在preprocess()添加图像缩放
+# 问题: 墨迹褪色,饱和度低
+# 解决: 降低饱和度阈值
+
+# 修改 utils/color_classifier.py:21行
+min_saturation=10  # 默认30 → 10
+
+# 或在初始化时传入
+classifier = ColorClassifier(min_saturation=10)
+```
+
+### 3. 内存占用过高
+```python
+# 问题: 大图片内存溢出
+# 解决: 在 classify_by_color() 开头添加缩放
+
+# 修改 utils/color_classifier.py:62行后添加
 max_size = 2000
+h, w = img.shape[:2]
 if max(h, w) > max_size:
     scale = max_size / max(h, w)
     img = cv2.resize(img, None, fx=scale, fy=scale)
+    h, w = img.shape[:2]
+```
+
+### 4. 网格太粗糙,细节丢失
+```python
+# 问题: 默认20×20网格太大
+# 解决: 降低网格大小
+
+# 初始化时传入
+classifier = ColorClassifier(grid_size=10)
+
+# 注意: grid_size↓ → 计算时间↑ (指数增长)
+```
+
+### 5. JSON序列化错误
+```python
+# 问题: NumPy类型无法序列化为JSON
+# 解决: 已在 app.py:98-112行实现 convert_to_native()
+
+# 若遇到新的NumPy类型错误,检查返回的字典是否经过转换
+response['stats'] = convert_to_native(response['stats'])
+```
+
+### 6. 客户端断开连接错误 (499)
+```python
+# 问题: 用户关闭浏览器导致 BrokenPipeError
+# 解决: 已在 app.py:142-147行实现异常捕获
+
+# 不会影响服务器运行,正常现象
+```
+
+## 网页完善要点 (当前feature分支重点)
+
+### 前端优化建议
+1. **响应式设计**: 当前已支持基本响应式,可进一步优化移动端体验
+2. **进度条**: 长时间处理时显示实时进度 (可通过WebSocket实现)
+3. **预览功能**: 上传后立即显示缩略图,确认后再处理
+4. **批量上传**: 支持一次上传多个文件
+5. **下载打包**: 将所有结果打包成ZIP下载
+6. **参数调整**: Web界面暴露关键参数 (grid_size, min_saturation等)
+
+### 后端优化建议
+1. **异步处理**: 使用Celery处理长时间任务,避免超时
+2. **缓存机制**: 相同文件不重复处理
+3. **错误恢复**: 处理失败时保留中间结果
+4. **日志记录**: 详细的操作日志和性能指标
+5. **API版本**: 提供RESTful API供外部调用
+
+### 性能优化
+```python
+# 大图自动缩放 (添加到 app.py:83行后)
+MAX_IMAGE_SIZE = 2000
+
+def resize_if_needed(img):
+    h, w = img.shape[:2]
+    if max(h, w) > MAX_IMAGE_SIZE:
+        scale = MAX_IMAGE_SIZE / max(h, w)
+        return cv2.resize(img, None, fx=scale, fy=scale)
+    return img
+```
+
+### 用户体验优化
+```javascript
+// 添加到 static/js/main.js
+// 1. 文件大小限制提示
+// 2. 拖拽区域高亮
+// 3. 实时预览
+// 4. 处理进度估算
+// 5. 结果图片缩放查看
 ```
 
 ## 开发建议
 
-### 已实现功能评估 (基于实际测试,非提交注释)
-1. ✅ **表格分离**(85%准确度): 生产可用,唯一成功的功能
-2. ⚠️ **手写/印刷体分类**(60%): 需人工校正或深度学习重构
-3. ❌ **颜色分类**(15%): 历史文档完全不适用,放弃
+### 当前功能评估
+- ✅ **网格颜色分类**: 适用于彩色现代文档 (黑/蓝/红笔区分)
+- ❌ **历史文档**: 墨迹褪色,饱和度<25,聚类结果无意义
 
-### 改进方向 (按优先级)
+### 改进方向 (网页完善方向)
 
-**短期(1-2周)**:
-1. 实现倾斜校正(Hough变换检测角度+仿射变换)
-2. 优化手写体分类:
-   - 收集样本,训练轻量级CNN(MobileNet)
-   - 或使用预训练Transformer模型
-3. 添加表格结构化解析(提取单元格→CSV/JSON)
+**短期 (1周)**:
+1. ✅ 基础Web界面 (已完成)
+2. ⏳ 添加参数调整UI (grid_size, white_threshold, min_saturation)
+3. ⏳ 实现文件预览功能
+4. ⏳ 添加结果下载打包
 
-**中期(1-2月)**:
-1. 实现批量处理(多文件上传)
-2. 集成OCR识别(EasyOCR已初始化,需整合到流程)
-3. 支持复杂表格(嵌套表格,斜线表头)
+**中期 (1个月)**:
+1. ⏳ 批量处理功能
+2. ⏳ 处理进度实时显示 (WebSocket)
+3. ⏳ 结果历史记录 (数据库)
+4. ⏳ 用户认证和权限管理
 
-**长期(3-6月)**:
-1. 训练专用历史文档OCR模型
-2. 开发文档结构化解析引擎
-3. 云部署+API服务
+**长期 (3个月)**:
+1. ⏳ RESTful API服务
+2. ⏳ Docker容器化部署
+3. ⏳ 云存储集成 (OSS)
+4. ⏳ 分布式处理 (多GPU/多机)
 
-### 禁止操作 (遵循全局CLAUDE.md)
-- ❌ **严禁执行 rm 命令** (删除文件请运行 `~/.claude/scripts/popup.fish warning`)
-- ❌ 不要私自创建一堆脚本(需要时设置test_scripts/单独文件夹)
-- ❌ 对于cpp代码,不要单独写CMakeLists.txt(添加到现有的)
-- ❌ 尽量在原有文件基础上修改,不要自作主张新添文件
+### 已移除功能
+- **表格分离** (utils/table_detector.py): 2025-10-08移除,代码仍保留但标记为DEPRECATED
+- **手写/印刷体分类** (utils/text_classifier.py): 同上
 
-### 代理调用建议 (遵循全局CLAUDE.md)
-- 优化Python代码 → `python-pro`
-- 性能问题 → `performance-engineer` + `database-optimizer`(如涉及数据库)
-- 代码完成后 → `code-reviewer`(必须)
-- 架构变更 → `architect-reviewer`
+若需恢复,参考 git 历史记录:
+```bash
+git log --all --oneline | grep "表格"
+git checkout 31ad7c5  # 表格分离完善版本
+```
 
 ## 测试样本说明
 
-`Pictures/原始.jpg` 特点:
-- **历史档案扫描件**: 纸张老化,污渍,破损
-- **复杂布局**: 左侧印刷表格(多行多列) + 右侧手写批注(毛笔字)
-- **低质量**: 低对比度,表格线模糊断裂,墨迹褪色成灰色
-- **多语言**: 中文文本
-- **检测挑战**:
-  - 手写/印刷体特征差异小(导致分类准确度仅60%)
-  - 墨迹褪色(导致颜色分类完全失效)
-  - 表格线断裂(已通过增大maxLineGap=30解决)
+建议使用**彩色现代文档**测试:
+- ✅ 多色笔记 (黑/蓝/红笔)
+- ✅ 印章批注 (红色印章 vs 黑色文字)
+- ✅ 标记重点 (黄色/绿色荧光笔)
+
+不适用场景:
+- ❌ 历史档案扫描件 (墨迹褪色)
+- ❌ 黑白文档 (无颜色差异)
+- ❌ 低质量扫描 (分辨率<150dpi)
+
+测试文件位置: `Pictures/原始.jpg`
 
 ## 技术债务
 
 ### 高优先级
-1. **手写/印刷体分类需完全重构** (当前60%不可用)
-   - 建议方案: 深度学习(CNN/Transformer)或人工标注训练集
-2. **颜色分类对历史文档完全失效** (15%准确度)
-   - 建议: 仅用于彩色现代文档,或研发专门的墨迹深度分析算法
+1. **历史文档支持**: 当前颜色聚类对褪色文档完全失效,需研发墨迹深度分析算法
+2. **大图优化**: >2000px图片内存占用高,需自动缩放
+3. **Web参数暴露**: 关键参数应在界面可调,无需修改代码
 
 ### 中优先级
-3. 倾斜校正缺失(影响倾斜扫描件)
-4. 复杂表格支持有限(嵌套表格,斜线表头)
+4. 批量处理功能缺失
+5. 异步任务处理 (避免超时)
+6. 结果缓存机制
 
 ### 低优先级
-5. 大图缩放优化(>2000px内存占用高)
-6. GPU加速(当前CPU模式,EasyOCR初始化3-5秒)
+7. 前端UI美化 (进度条,预览功能)
+8. 导出格式扩展 (JSON/CSV/Excel)
+9. API文档 (Swagger/OpenAPI)
+
+## 代码规范
+
+遵循全局 `~/.claude/CLAUDE.md` 规范:
+- ❌ **严禁 rm 命令**
+- ❌ 不要私自新建文件 (在原有基础上修改)
+- ✅ 使用 fish 终端
+- ✅ Python 虚拟环境使用 conda
+- ✅ 注释使用标记: `// TODO`, `// FIXME`, `// !`, `// *`, `// ?`
+- ✅ 代码完成后调用 `code-reviewer` 代理
+
+## 相关文档
+
+- **开发历程**: `docs/开发历程文档.md` - 完整的15次提交历程,失败经验总结
+- **原始需求**: `docs/要求.md` - 最初的项目需求
+- **主分支文档**: `/home/serennan/work/Font-Separate/CLAUDE.md` - 主分支同步的文档
+
+## Git工作流
+
+```bash
+# 当前分支: feature/网页完善
+git branch
+# * 网页完善
+
+# 查看变更
+git status
+
+# 提交变更
+git add .
+git commit -m "完善Web界面: 添加XXX功能"
+
+# 合并到主分支前先pull
+git checkout main  # 或默认分支
+git pull
+git merge 网页完善
+
+# 解决冲突后推送
+git push
+```

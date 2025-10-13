@@ -129,40 +129,66 @@ function displayResults(data) {
 
     document.getElementById('stats').innerHTML = statsHtml;
 
-    // 清空图像网格
-    const imagesGrid = document.querySelector('.images-grid');
-    imagesGrid.innerHTML = `
-        <div class="image-card">
-            <h3>原始图像</h3>
-            <img src="${data.original}" alt="原始图像">
-        </div>
-        <div class="image-card">
-            <h3>颜色分类标注</h3>
-            <img src="${data.color_annotated}" alt="颜色分类标注">
-        </div>
-    `;
+    // 收集所有图片
+    const images = [];
 
-    // 动态添加颜色聚类图像
-    const colorClustersDiv = document.getElementById('colorClusters');
-    colorClustersDiv.innerHTML = '';
+    // 1. 原始图像
+    images.push({
+        url: data.original,
+        title: '原始图像',
+        type: 'original'
+    });
+
+    // 2. 颜色分类标注
+    images.push({
+        url: data.color_annotated,
+        title: '颜色分类标注',
+        type: 'annotated'
+    });
+
+    // 3. 颜色聚类图像
     if (data.color_clusters && data.color_clusters.length > 0) {
         data.color_clusters.forEach((clusterUrl, index) => {
-            const card = document.createElement('div');
-            card.className = 'image-card';
-
-            // 从统计信息获取颜色类别名称
             let categoryLabel = `颜色类别 ${index}`;
             if (data.stats.color_info && data.stats.color_info[index]) {
                 const info = data.stats.color_info[index];
-                categoryLabel = `${info.type === 'color' ? '彩色' : '灰度'} - ${info.name} (${info.count}个)`;
+                categoryLabel = `${info.type === 'color' ? '彩色' : '灰度'} - ${info.name}`;
             }
 
-            card.innerHTML = `
-                <h3>${categoryLabel}</h3>
-                <img src="${clusterUrl}" alt="颜色类别 ${index}">
-            `;
-            colorClustersDiv.appendChild(card);
+            images.push({
+                url: clusterUrl,
+                title: categoryLabel,
+                type: 'cluster',
+                index: index
+            });
         });
+    }
+
+    // 生成缩略图列表
+    const thumbnailList = document.getElementById('thumbnailList');
+    thumbnailList.innerHTML = '';
+
+    images.forEach((img, index) => {
+        const thumbnailItem = document.createElement('div');
+        thumbnailItem.className = 'thumbnail-item';
+        thumbnailItem.dataset.index = index;
+
+        thumbnailItem.innerHTML = `
+            <img src="${img.url}" alt="${img.title}">
+            <div class="thumbnail-label">${img.title}</div>
+        `;
+
+        // 点击缩略图切换大图
+        thumbnailItem.addEventListener('click', () => {
+            showMainImage(img, index);
+        });
+
+        thumbnailList.appendChild(thumbnailItem);
+    });
+
+    // 默认显示第一张图片(原始图像)
+    if (images.length > 0) {
+        showMainImage(images[0], 0);
     }
 
     // 显示结果区域
@@ -172,6 +198,30 @@ function displayResults(data) {
     setTimeout(() => {
         results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
+}
+
+// 显示主图像
+function showMainImage(imageData, index) {
+    const mainImage = document.getElementById('mainImage');
+    const currentImageTitle = document.getElementById('currentImageTitle');
+    const placeholder = document.querySelector('.placeholder');
+
+    // 更新标题
+    currentImageTitle.textContent = imageData.title;
+
+    // 隐藏占位符,显示图片
+    placeholder.style.display = 'none';
+    mainImage.style.display = 'block';
+    mainImage.src = imageData.url;
+
+    // 更新活动状态
+    document.querySelectorAll('.thumbnail-item').forEach((item, i) => {
+        if (i === index) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
 }
 
 // 显示错误
