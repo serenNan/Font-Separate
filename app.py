@@ -49,51 +49,26 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """处理文件上传和分类"""
+    """处理文件上传和分类 - 支持批量处理"""
     try:
         # 检测客户端是否断开连接
         if request.environ.get('werkzeug.server.shutdown'):
             print("⚠ 客户端已断开连接")
             return jsonify({'error': '请求已取消'}), 499
+
         # 检查是否有文件
-        if 'file' not in request.files:
+        if 'files' not in request.files:
             return jsonify({'error': '没有文件'}), 400
 
-        file = request.files['file']
+        files = request.files.getlist('files')
 
-        # 检查文件名
-        if file.filename == '':
+        # 检查是否有文件
+        if not files or len(files) == 0:
             return jsonify({'error': '未选择文件'}), 400
-
-        if not allowed_file(file.filename):
-            return jsonify({'error': '不支持的文件格式'}), 400
-
-        # 保存上传的文件（添加时间戳确保文件名唯一）
-        original_filename = secure_filename(file.filename)
-        # 分离文件名和扩展名
-        name, ext = os.path.splitext(original_filename)
-        # 添加时间戳
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]  # 精确到毫秒前3位
-        filename = f"{name}_{timestamp}{ext}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
-        print(f"保存文件: {original_filename} -> {filename}")
-        file.save(filepath)
 
         # 初始化分类器（首次使用时）
         init_classifier()
 
-        base_name = os.path.splitext(filename)[0]
-
-        # 执行颜色分类
-        print("[1/1] 正在进行颜色分类...")
-        color_result = color_classifier.classify_by_color(
-            filepath,
-            app.config['RESULT_FOLDER']
-        )
-        print(f"  检测到 {color_result['n_clusters']} 个颜色类别")
-
-        # 返回结果路径（相对路径）
         # 将 NumPy 类型转换为 Python 原生类型(解决 JSON 序列化问题)
         def convert_to_native(obj):
             """递归转换 NumPy 类型为 Python 原生类型"""
@@ -111,33 +86,101 @@ def upload_file():
             else:
                 return obj
 
-        # 构建响应
-        response = {
-            'success': True,
-            'original': f'/uploads/{filename}',
-            'color_annotated': f'/results/{base_name}_color_annotated.jpg',
-            'color_clusters': [f'/results/{base_name}_cluster_{i}.jpg'
-                              for i in range(color_result['n_clusters'])],
-            'stats': {
-                'color_categories': color_result['n_clusters'],
-                'color_info': [
-                    {
-                        'type': 'color',
-                        'name': info['description'],
-                        'count': info['count'],
-                        'rgb': info['color_rgb'],
-                        'hsv': info['color_hsv']
+        # 处理所有文件
+        results = []
+
+        for idx, file in enumerate(files):
+            # 检查文件名
+            if file.filename == '':
+                continue
+
+            if not allowed_file(file.filename):
+                results.append({
+                    'success': False,
+                    'filename': file.filename,
+                    'error': '不支持的文件格式'
+                })
+                continue
+
+            # 检查文件大小
+            file.seek(0, 2)  # 移动到文件末尾
+            file_size = file.tell()
+            file.seek(0)  # 重置到开头
+
+            if file_size > 16 * 1024 * 1024:
+                results.append({
+                    'success': False,
+                    'filename': file.filename,
+                    'error': '文件大小超过16MB'
+                })
+                continue
+
+            # 保存上传的文件（添加时间戳确保文件名唯一）
+            original_filename = secure_filename(file.filename)
+            name, ext = os.path.splitext(original_filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]
+            filename = f"{name}_{timestamp}_{idx}{ext}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+            print(f"[{idx+1}/{len(files)}] 保存文件: {original_filename} -> {filename}")
+            file.save(filepath)
+
+            base_name = os.path.splitext(filename)[0]
+
+            try:
+                # 执行颜色分类
+                print(f"[{idx+1}/{len(files)}] 正在进行颜色分类...")
+                color_result = color_classifier.classify_by_color(
+                    filepath,
+                    app.config['RESULT_FOLDER']
+                )
+                print(f"  检测到 {color_result['n_clusters']} 个颜色类别")
+
+                # 构建单个文件的响应
+                file_response = {
+                    'success': True,
+                    'filename': original_filename,
+                    'original': f'/uploads/{filename}',
+                    'color_annotated': f'/results/{base_name}_color_annotated.jpg',
+                    'color_clusters': [f'/results/{base_name}_cluster_{i}.jpg'
+                                      for i in range(color_result['n_clusters'])],
+                    'stats': {
+                        'color_categories': color_result['n_clusters'],
+                        'color_info': [
+                            {
+                                'type': 'color',
+                                'name': info['description'],
+                                'count': info['count'],
+                                'rgb': info['color_rgb'],
+                                'hsv': info['color_hsv']
+                            }
+                            for info in color_result['clusters'].values()
+                        ]
                     }
-                    for info in color_result['clusters'].values()
-                ]
-            }
-        }
+                }
 
-        # 转换 NumPy 类型
-        response['stats'] = convert_to_native(response['stats'])
+                # 转换 NumPy 类型
+                file_response['stats'] = convert_to_native(file_response['stats'])
 
-        print(f"✓ 处理完成")
-        return jsonify(response)
+                results.append(file_response)
+                print(f"[{idx+1}/{len(files)}] ✓ 处理完成")
+
+            except Exception as e:
+                print(f"[{idx+1}/{len(files)}] ✗ 处理失败: {str(e)}")
+                results.append({
+                    'success': False,
+                    'filename': original_filename,
+                    'error': f'处理失败: {str(e)}'
+                })
+
+        print(f"✓ 批量处理完成，成功 {sum(1 for r in results if r.get('success'))} 个，失败 {sum(1 for r in results if not r.get('success'))} 个")
+
+        return jsonify({
+            'success': True,
+            'results': results,
+            'total': len(files),
+            'processed': len(results)
+        })
 
     except BrokenPipeError:
         print("⚠ 客户端已断开连接（BrokenPipeError）")

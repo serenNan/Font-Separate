@@ -1,34 +1,27 @@
-// 获取DOM元素
 const uploadBox = document.getElementById('uploadBox');
 const fileInput = document.getElementById('fileInput');
 const loading = document.getElementById('loading');
+const loadingText = document.getElementById('loadingText');
 const results = document.getElementById('results');
 const error = document.getElementById('error');
 const newImageBtn = document.getElementById('newImageBtn');
+const sampleTabs = document.getElementById('sampleTabs');
 
-// 缓存当前上传的文件
-let currentFile = null;
-
-// AbortController 用于取消请求
+let allSamplesData = [];
+let currentSampleIndex = 0;
 let currentAbortController = null;
-
-// 点击上传区域
 uploadBox.addEventListener('click', () => {
     fileInput.click();
 });
 
-// 文件选择
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        const newFile = e.target.files[0];
-        console.log('选择了新文件:', newFile.name);
-        currentFile = newFile;
-        handleFile(currentFile);
+        const files = Array.from(e.target.files);
+        console.log(`选择了 ${files.length} 个文件:`, files.map(f => f.name));
+        handleFiles(files);
     }
 });
 
-
-// 拖拽上传
 uploadBox.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadBox.classList.add('dragover');
@@ -43,51 +36,58 @@ uploadBox.addEventListener('drop', (e) => {
     uploadBox.classList.remove('dragover');
 
     if (e.dataTransfer.files.length > 0) {
-        currentFile = e.dataTransfer.files[0];
-        handleFile(currentFile);
+        const files = Array.from(e.dataTransfer.files);
+        handleFiles(files);
     }
 });
 
-// 处理文件
-async function handleFile(file) {
-    console.log('handleFile 被调用，文件名:', file.name, '文件大小:', file.size);
+async function handleFiles(files) {
+    console.log(`handleFiles 被调用，共 ${files.length} 个文件`);
 
-    // 检查文件类型
-    if (!file.type.startsWith('image/')) {
-        showError('请上传图像文件');
+    const validFiles = files.filter(file => {
+        if (!file.type.startsWith('image/')) {
+            console.log(`跳过非图像文件: ${file.name}`);
+            return false;
+        }
+        if (file.size > 16 * 1024 * 1024) {
+            console.log(`跳过大文件 (>16MB): ${file.name}`);
+            showError(`文件 ${file.name} 大小超过16MB，已跳过`);
+            return false;
+        }
+        return true;
+    });
+
+    if (validFiles.length === 0) {
+        showError('没有有效的图像文件');
         return;
     }
 
-    // 检查文件大小（16MB）
-    if (file.size > 16 * 1024 * 1024) {
-        showError('文件大小不能超过16MB');
-        return;
-    }
+    console.log(`有效文件数: ${validFiles.length}`);
 
-    // 只有颜色分类功能
-    console.log('使用颜色分类');
-
-    // 如果有正在进行的请求，先取消
     if (currentAbortController) {
         currentAbortController.abort();
         console.log('已取消上一次请求');
     }
 
-    // 创建新的 AbortController
     currentAbortController = new AbortController();
 
-    // 隐藏上传区和结果，显示加载中
     uploadBox.style.display = 'none';
     results.style.display = 'none';
     error.style.display = 'none';
     loading.style.display = 'block';
 
-    // 创建FormData
+    if (validFiles.length > 1) {
+        loadingText.textContent = `正在处理 ${validFiles.length} 个图像，请稍候...`;
+    } else {
+        loadingText.textContent = '正在分析图像，请稍候...';
+    }
+
     const formData = new FormData();
-    formData.append('file', file);
+    validFiles.forEach(file => {
+        formData.append('files', file);
+    });
 
     try {
-        // 发送请求（带取消信号）
         const response = await fetch('/upload', {
             method: 'POST',
             body: formData,
@@ -100,11 +100,18 @@ async function handleFile(file) {
             throw new Error(data.error || '处理失败');
         }
 
-        // 显示结果
-        displayResults(data);
+        allSamplesData = data.results.filter(r => r.success);
+
+        if (allSamplesData.length === 0) {
+            throw new Error('所有文件处理失败');
+        }
+
+        console.log(`成功处理 ${allSamplesData.length} 个文件`);
+
+        currentSampleIndex = 0;
+        displayAllResults();
 
     } catch (err) {
-        // 如果是主动取消，不显示错误
         if (err.name === 'AbortError') {
             console.log('请求已被取消');
             return;
@@ -117,9 +124,54 @@ async function handleFile(file) {
     }
 }
 
-// 显示结果
-function displayResults(data) {
-    // 设置统计信息
+function displayAllResults() {
+    if (allSamplesData.length > 1) {
+        sampleTabs.style.display = 'flex';
+        sampleTabs.innerHTML = '';
+
+        allSamplesData.forEach((sampleData, index) => {
+            const tab = document.createElement('div');
+            tab.className = 'sample-tab';
+            if (index === currentSampleIndex) {
+                tab.classList.add('active');
+            }
+
+            tab.innerHTML = `
+                <img src="${sampleData.original}" alt="${sampleData.filename}" class="sample-tab-thumbnail" title="${sampleData.filename}">
+            `;
+
+            tab.addEventListener('click', () => {
+                switchSample(index);
+            });
+
+            sampleTabs.appendChild(tab);
+        });
+    } else {
+        sampleTabs.style.display = 'none';
+    }
+
+    displayCurrentSample();
+}
+
+function switchSample(index) {
+    if (index === currentSampleIndex) return;
+
+    currentSampleIndex = index;
+
+    document.querySelectorAll('.sample-tab').forEach((tab, i) => {
+        if (i === index) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    displayCurrentSample();
+}
+
+function displayCurrentSample() {
+    const data = allSamplesData[currentSampleIndex];
+
     let statsHtml = `
         <div class="stat-item">
             <div class="stat-number">${data.stats.color_categories}</div>
@@ -129,24 +181,20 @@ function displayResults(data) {
 
     document.getElementById('stats').innerHTML = statsHtml;
 
-    // 收集所有图片
     const images = [];
 
-    // 1. 原始图像
     images.push({
         url: data.original,
         title: '原始图像',
         type: 'original'
     });
 
-    // 2. 颜色分类标注
     images.push({
         url: data.color_annotated,
         title: '颜色分类标注',
         type: 'annotated'
     });
 
-    // 3. 颜色聚类图像
     if (data.color_clusters && data.color_clusters.length > 0) {
         data.color_clusters.forEach((clusterUrl, index) => {
             let categoryLabel = `颜色类别 ${index}`;
@@ -164,7 +212,6 @@ function displayResults(data) {
         });
     }
 
-    // 生成缩略图列表
     const thumbnailList = document.getElementById('thumbnailList');
     thumbnailList.innerHTML = '';
 
@@ -178,7 +225,6 @@ function displayResults(data) {
             <div class="thumbnail-label">${img.title}</div>
         `;
 
-        // 点击缩略图切换大图
         thumbnailItem.addEventListener('click', () => {
             showMainImage(img, index);
         });
@@ -186,35 +232,28 @@ function displayResults(data) {
         thumbnailList.appendChild(thumbnailItem);
     });
 
-    // 默认显示第一张图片(原始图像)
     if (images.length > 0) {
         showMainImage(images[0], 0);
     }
 
-    // 显示结果区域
     results.style.display = 'block';
 
-    // 平滑滚动到结果区域
     setTimeout(() => {
         results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
 }
 
-// 显示主图像
 function showMainImage(imageData, index) {
     const mainImage = document.getElementById('mainImage');
     const currentImageTitle = document.getElementById('currentImageTitle');
     const placeholder = document.querySelector('.placeholder');
 
-    // 更新标题
     currentImageTitle.textContent = imageData.title;
 
-    // 隐藏占位符,显示图片
     placeholder.style.display = 'none';
     mainImage.style.display = 'block';
     mainImage.src = imageData.url;
 
-    // 更新活动状态
     document.querySelectorAll('.thumbnail-item').forEach((item, i) => {
         if (i === index) {
             item.classList.add('active');
@@ -224,44 +263,36 @@ function showMainImage(imageData, index) {
     });
 }
 
-// 显示错误
 function showError(message) {
     error.textContent = '❌ ' + message;
     error.style.display = 'block';
 
-    // 3秒后自动隐藏
     setTimeout(() => {
         error.style.display = 'none';
     }, 3000);
 }
 
-// 重置上传区
 function resetUpload() {
     console.log('resetUpload 被调用');
-    console.log('当前 currentFile:', currentFile ? currentFile.name : 'null');
 
-    // 取消可能存在的请求
     if (currentAbortController) {
         currentAbortController.abort();
         currentAbortController = null;
         console.log('已取消当前处理');
     }
 
-    // 先清空 fileInput.value，确保即使选择同一文件也能触发 change 事件
     fileInput.value = '';
-
-    // 重置状态
-    currentFile = null;
+    allSamplesData = [];
+    currentSampleIndex = 0;
+    sampleTabs.style.display = 'none';
     results.style.display = 'none';
     loading.style.display = 'none';
     uploadBox.style.display = 'block';
     error.style.display = 'none';
 
-    // 平滑滚动到上传区
     setTimeout(() => {
         uploadBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
 
-    // 触发文件选择
     fileInput.click();
 }

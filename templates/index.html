@@ -15,7 +15,7 @@
 
         <div class="upload-section">
             <div class="upload-box" id="uploadBox">
-                <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                <input type="file" id="fileInput" accept="image/*" multiple style="display: none;">
                 <div class="upload-prompt">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -23,31 +23,29 @@
                         <line x1="12" y1="3" x2="12" y2="15"></line>
                     </svg>
                     <h3>点击或拖拽上传图像</h3>
-                    <p>支持 JPG、PNG、BMP、TIFF 格式</p>
+                    <p>支持 JPG、PNG、BMP、TIFF 格式 | 支持批量上传</p>
                 </div>
             </div>
         </div>
 
         <div class="loading" id="loading" style="display: none;">
             <div class="spinner"></div>
-            <p>正在分析图像，请稍候...</p>
+            <p id="loadingText">正在分析图像，请稍候...</p>
         </div>
 
         <div class="results" id="results" style="display: none;">
             <h2>分离结果</h2>
 
+            <div class="sample-tabs" id="sampleTabs" style="display: none;"></div>
+
             <div class="stats" id="stats"></div>
 
             <div class="viewer-container">
-                <!-- 左侧缩略图侧边栏 -->
                 <div class="sidebar" id="sidebar">
                     <h3>图像列表</h3>
-                    <div class="thumbnail-list" id="thumbnailList">
-                        <!-- 缩略图将通过JS动态添加 -->
-                    </div>
+                    <div class="thumbnail-list" id="thumbnailList"></div>
                 </div>
 
-                <!-- 右侧大图显示区 -->
                 <div class="main-view" id="mainView">
                     <div class="image-info">
                         <h3 id="currentImageTitle">选择左侧图片查看</h3>
