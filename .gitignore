@@ -51,3 +51,4 @@ inference/
 *.bak
 *~
 截图
+.vscode
