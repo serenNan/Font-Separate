@@ -567,3 +567,236 @@ footer {
         height: 90px;
     }
 }
+
+/* 嵌入式参数调整面板 */
+.params-panel-embedded {
+    background: white;
+    border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    margin-top: 30px;
+}
+
+.params-panel-embedded .params-header {
+    padding: 15px 25px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.params-panel-embedded .params-header h3 {
+    color: white;
+    font-size: 1.1em;
+    margin: 0;
+    text-align: center;
+}
+
+.params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    padding: 25px;
+    background: #fafafa;
+}
+
+.param-actions-embedded {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.param-actions-embedded .btn {
+    flex: 1;
+    max-width: 200px;
+}
+
+.param-actions-embedded .param-status {
+    flex: 1;
+    margin: 0;
+}
+
+.param-item {
+    margin-bottom: 25px;
+}
+
+.param-item:last-of-type {
+    margin-bottom: 20px;
+}
+
+.param-item label {
+    display: block;
+    color: #333;
+    font-size: 1em;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+.param-value {
+    display: inline-block;
+    min-width: 35px;
+    padding: 2px 8px;
+    background: #667eea;
+    color: white;
+    border-radius: 4px;
+    font-weight: bold;
+    text-align: center;
+    margin: 0 5px;
+}
+
+.param-hint {
+    font-size: 0.85em;
+    color: #666;
+    margin-top: 5px;
+    font-style: italic;
+}
+
+/* 滑块样式美化 */
+input[type="range"] {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: #ddd;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 3px 10px rgba(102, 126, 234, 0.6);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 3px 10px rgba(102, 126, 234, 0.6);
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
+    background: #ddd;
+    border-radius: 3px;
+}
+
+input[type="range"]::-moz-range-track {
+    width: 100%;
+    height: 6px;
+    background: #ddd;
+    border-radius: 3px;
+}
+
+/* 参数操作按钮区域 */
+.param-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.btn-apply {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    transition: all 0.3s ease;
+    width: 100%;
+}
+
+.btn-apply:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5568d3 0%, #653a8e 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-apply:disabled {
+    background: #ccc;
+    color: #888;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.btn-apply:not(:disabled) {
+    animation: pulse-soft 2s ease-in-out infinite;
+}
+
+@keyframes pulse-soft {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(102, 126, 234, 0);
+    }
+}
+
+.btn-secondary {
+    width: 100%;
+}
+
+/* 参数状态提示 */
+.param-status {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    text-align: center;
+    display: none;
+}
+
+.param-status.show {
+    display: block;
+}
+
+.param-status.processing {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.param-status.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.param-status.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* 移动端布局调整 */
+@media (max-width: 768px) {
+    .params-grid {
+        grid-template-columns: 1fr;
+        padding: 20px;
+    }
+
+    .param-actions-embedded {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .param-actions-embedded .btn {
+        max-width: none;
+    }
+}

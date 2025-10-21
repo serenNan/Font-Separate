@@ -173,7 +173,7 @@ best_k = 3  # 强制3个彩色类别
 ## 项目结构
 
 ```
-Font-Separate/feature/网页完善/
+Font-Separate/feature/颜色识别完善/
 ├── app.py (175行)                    # Flask主应用
 ├── utils/
 │   ├── color_classifier.py (430行)   # 网格颜色分类 (核心)
@@ -266,7 +266,7 @@ response['stats'] = convert_to_native(response['stats'])
 # 不会影响服务器运行,正常现象
 ```
 
-## 网页完善要点 (当前feature分支重点)
+## 颜色识别完善要点 (当前feature分支重点)
 
 ### 前端优化建议
 1. **响应式设计**: 当前已支持基本响应式,可进一步优化移动端体验
@@ -312,7 +312,7 @@ def resize_if_needed(img):
 - ✅ **网格颜色分类**: 适用于彩色现代文档 (黑/蓝/红笔区分)
 - ❌ **历史文档**: 墨迹褪色,饱和度<25,聚类结果无意义
 
-### 改进方向 (网页完善方向)
+### 改进方向 (颜色识别完善方向)
 
 **短期 (1周)**:
 1. ✅ 基础Web界面 (已完成)
@@ -392,21 +392,21 @@ git checkout 31ad7c5  # 表格分离完善版本
 ## Git工作流
 
 ```bash
-# 当前分支: feature/网页完善
+# 当前分支: feature/颜色识别完善
 git branch
-# * 网页完善
+# * 颜色识别完善
 
 # 查看变更
 git status
 
 # 提交变更
 git add .
-git commit -m "完善Web界面: 添加XXX功能"
+git commit -m "完善颜色识别: 添加XXX功能"
 
 # 合并到主分支前先pull
 git checkout main  # 或默认分支
 git pull
-git merge 网页完善
+git merge 颜色识别完善
 
 # 解决冲突后推送
 git push

@@ -10,6 +10,96 @@ const sampleTabs = document.getElementById('sampleTabs');
 let allSamplesData = [];
 let currentSampleIndex = 0;
 let currentAbortController = null;
+let currentFiles = null; // 保存当前上传的文件
+let lastAppliedParams = { grid_size: 20, white_threshold: 200, min_saturation: 30 }; // 最后应用的参数
+
+// 参数控制元素
+const gridSizeSlider = document.getElementById('gridSize');
+const whiteThresholdSlider = document.getElementById('whiteThreshold');
+const minSaturationSlider = document.getElementById('minSaturation');
+const gridSizeValue = document.getElementById('gridSizeValue');
+const whiteThresholdValue = document.getElementById('whiteThresholdValue');
+const minSaturationValue = document.getElementById('minSaturationValue');
+const applyParamsBtn = document.getElementById('applyParams');
+const paramStatus = document.getElementById('paramStatus');
+
+// 检查参数是否变化
+function checkParamsChanged() {
+    const current = getParams();
+    const changed = current.grid_size !== lastAppliedParams.grid_size ||
+                   current.white_threshold !== lastAppliedParams.white_threshold ||
+                   current.min_saturation !== lastAppliedParams.min_saturation;
+
+    applyParamsBtn.disabled = !changed || !currentFiles;
+    return changed;
+}
+
+// 参数滑块实时值显示和变化检测
+gridSizeSlider.addEventListener('input', (e) => {
+    gridSizeValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+whiteThresholdSlider.addEventListener('input', (e) => {
+    whiteThresholdValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+minSaturationSlider.addEventListener('input', (e) => {
+    minSaturationValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+// 重置参数到默认值
+function resetParams() {
+    gridSizeSlider.value = 20;
+    whiteThresholdSlider.value = 200;
+    minSaturationSlider.value = 30;
+
+    gridSizeValue.textContent = '20';
+    whiteThresholdValue.textContent = '200';
+    minSaturationValue.textContent = '30';
+
+    checkParamsChanged();
+}
+
+// 获取当前参数值
+function getParams() {
+    return {
+        grid_size: parseInt(gridSizeSlider.value),
+        white_threshold: parseInt(whiteThresholdSlider.value),
+        min_saturation: parseInt(minSaturationSlider.value)
+    };
+}
+
+// 显示参数状态
+function showParamStatus(message, type) {
+    paramStatus.textContent = message;
+    paramStatus.className = 'param-status show ' + type;
+
+    if (type !== 'processing') {
+        setTimeout(() => {
+            paramStatus.className = 'param-status';
+        }, 3000);
+    }
+}
+
+// 应用参数：重新处理当前文件
+async function applyParams() {
+    if (!currentFiles) {
+        showParamStatus('没有可处理的文件', 'error');
+        return;
+    }
+
+    console.log('应用新参数并重新处理...');
+    showParamStatus('正在应用新参数...', 'processing');
+    applyParamsBtn.disabled = true;
+
+    await handleFiles(currentFiles);
+
+    lastAppliedParams = getParams();
+    checkParamsChanged();
+}
 uploadBox.addEventListener('click', () => {
     fileInput.click();
 });
@@ -64,6 +154,9 @@ async function handleFiles(files) {
 
     console.log(`有效文件数: ${validFiles.length}`);
 
+    // 保存当前文件，用于参数调整后重新处理
+    currentFiles = validFiles;
+
     if (currentAbortController) {
         currentAbortController.abort();
         console.log('已取消上一次请求');
@@ -86,6 +179,14 @@ async function handleFiles(files) {
     validFiles.forEach(file => {
         formData.append('files', file);
     });
+
+    // 添加参数
+    const params = getParams();
+    formData.append('grid_size', params.grid_size);
+    formData.append('white_threshold', params.white_threshold);
+    formData.append('min_saturation', params.min_saturation);
+
+    console.log('处理参数:', params);
 
     try {
         const response = await fetch('/upload', {
@@ -111,12 +212,18 @@ async function handleFiles(files) {
         currentSampleIndex = 0;
         displayAllResults();
 
+        // 更新最后应用的参数
+        lastAppliedParams = params;
+        checkParamsChanged();
+        showParamStatus('处理完成！', 'success');
+
     } catch (err) {
         if (err.name === 'AbortError') {
             console.log('请求已被取消');
             return;
         }
         showError(err.message);
+        showParamStatus('处理失败: ' + err.message, 'error');
         uploadBox.style.display = 'block';
     } finally {
         loading.style.display = 'none';
@@ -187,6 +294,12 @@ function displayCurrentSample() {
         url: data.original,
         title: '原始图像',
         type: 'original'
+    });
+
+    images.push({
+        url: data.white_extract,
+        title: '白色提取预处理',
+        type: 'white_extract'
     });
 
     images.push({
@@ -284,11 +397,16 @@ function resetUpload() {
     fileInput.value = '';
     allSamplesData = [];
     currentSampleIndex = 0;
+    currentFiles = null;
     sampleTabs.style.display = 'none';
     results.style.display = 'none';
     loading.style.display = 'none';
     uploadBox.style.display = 'block';
     error.style.display = 'none';
+
+    // 重置参数按钮状态
+    checkParamsChanged();
+    paramStatus.className = 'param-status';
 
     setTimeout(() => {
         uploadBox.scrollIntoView({ behavior: 'smooth', block: 'center' });

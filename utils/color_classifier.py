@@ -69,6 +69,22 @@ class ColorClassifier:
         if self.debug:
             print(f"图片尺寸: {w}x{h}, 总像素: {h*w}")
 
+        # 生成白色提取预处理图像（显示哪些部分被认为是背景）
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        white_mask_img = np.zeros_like(img)  # 黑色背景
+
+        # 创建白色掩码：RGB都≥white_threshold的像素显示为黑色（背景），其他像素保留原色（文字）
+        white_pixels = (img_rgb[:, :, 0] >= self.white_threshold) & \
+                      (img_rgb[:, :, 1] >= self.white_threshold) & \
+                      (img_rgb[:, :, 2] >= self.white_threshold)
+        non_white_pixels = ~white_pixels
+
+        # 非白色区域（文字）保持原图颜色，白色区域（背景）显示为黑色
+        white_mask_img[non_white_pixels] = img[non_white_pixels]
+
+        white_extract_path = os.path.join(output_dir, f"{base_name}_white_extract.jpg")
+        cv2.imwrite(white_extract_path, white_mask_img)
+
         # 2. 将图像分成网格,每个网格取中位数颜色
         if self.debug:
             print(f"将图像分成{self.grid_size}×{self.grid_size}像素的网格...")
@@ -364,7 +380,8 @@ class ColorClassifier:
             'clusters': cluster_info,
             'annotated_path': annotated_path,
             'cluster_paths': cluster_paths,
-            'palette_path': palette_path
+            'palette_path': palette_path,
+            'white_extract_path': white_extract_path
         }
 
     def _generate_distinct_colors(self, n: int) -> List[Tuple[int, int, int]]:

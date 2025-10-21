@@ -67,8 +67,20 @@ def upload_file():
         if not files or len(files) == 0:
             return jsonify({'error': '未选择文件'}), 400
 
-        # 初始化分类器（首次使用时）
-        init_classifier()
+        # 获取参数
+        grid_size = int(request.form.get('grid_size', 20))
+        white_threshold = int(request.form.get('white_threshold', 200))
+        min_saturation = int(request.form.get('min_saturation', 30))
+
+        print(f"使用参数: grid_size={grid_size}, white_threshold={white_threshold}, min_saturation={min_saturation}")
+
+        # 使用当前参数创建分类器实例
+        current_classifier = ColorClassifier(
+            debug=False,
+            white_threshold=white_threshold,
+            grid_size=grid_size,
+            min_saturation=min_saturation
+        )
 
         # 将 NumPy 类型转换为 Python 原生类型(解决 JSON 序列化问题)
         def convert_to_native(obj):
@@ -131,7 +143,7 @@ def upload_file():
             try:
                 # 执行颜色分类
                 print(f"[{idx+1}/{len(files)}] 正在进行颜色分类...")
-                color_result = color_classifier.classify_by_color(
+                color_result = current_classifier.classify_by_color(
                     filepath,
                     app.config['RESULT_FOLDER']
                 )
@@ -142,6 +154,7 @@ def upload_file():
                     'success': True,
                     'filename': original_filename,
                     'original': f'/uploads/{filename}',
+                    'white_extract': f'/results/{base_name}_white_extract.jpg',
                     'color_annotated': f'/results/{base_name}_color_annotated.jpg',
                     'color_clusters': [f'/results/{base_name}_cluster_{i}.jpg'
                                       for i in range(color_result['n_clusters'])],
