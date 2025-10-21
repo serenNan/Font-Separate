@@ -11,6 +11,7 @@ import sys
 sys.path.append(os.path.dirname(__file__))
 import traceback
 from datetime import datetime
+import socket
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 最大16MB
@@ -206,13 +207,70 @@ def result_file(filename):
     return send_from_directory(app.config['RESULT_FOLDER'], filename)
 
 
-if __name__ == '__main__':
-    print("=" * 60)
-    print("Font-Separate 文档图像智能分离系统")
-    print("功能: 颜色分类")
-    print("=" * 60)
-    print("启动服务器...")
-    print("访问地址: http://localhost:5000")
-    print("=" * 60)
+def is_port_available(port, host='0.0.0.0'):
+    """
+    检测端口是否可用
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    Args:
+        port: 端口号
+        host: 主机地址
+
+    Returns:
+        bool: 端口可用返回 True，否则返回 False
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            return True
+    except OSError:
+        return False
+
+
+if __name__ == '__main__':
+    # 检测是否是 reloader 子进程
+    # WERKZEUG_RUN_MAIN 环境变量在 reloader 子进程中会被设置为 'true'
+    is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+
+    if not is_reloader:
+        # 主进程：查找可用端口
+        print("=" * 60)
+        print("Font-Separate 文档图像智能分离系统")
+        print("功能: 颜色分类")
+        print("=" * 60)
+        print("正在查找可用端口...")
+
+        # 从5000开始查找可用端口
+        port = 5000
+        max_port = 5100
+        found_port = None
+
+        for current_port in range(port, max_port):
+            if is_port_available(current_port):
+                found_port = current_port
+                print(f"✓ 找到可用端口: {found_port}")
+                break
+            else:
+                print(f"✗ 端口 {current_port} 已被占用")
+
+        if found_port is None:
+            print(f"✗ 无法找到可用端口 (尝试范围: {port}-{max_port-1})")
+            sys.exit(1)
+
+        # 将端口号保存到环境变量，供 reloader 子进程使用
+        os.environ['FLASK_SERVER_PORT'] = str(found_port)
+
+        print("=" * 60)
+        print(f"访问地址: http://localhost:{found_port}")
+        print(f"局域网访问: http://<你的IP>:{found_port}")
+        print("=" * 60)
+        print("按 Ctrl+C 停止服务器")
+        print("=" * 60)
+    else:
+        # reloader 子进程：从环境变量读取端口号
+        found_port = int(os.environ.get('FLASK_SERVER_PORT', 5000))
+
+    try:
+        app.run(debug=True, host='0.0.0.0', port=found_port)
+    except KeyboardInterrupt:
+        print("\n服务器已停止")
