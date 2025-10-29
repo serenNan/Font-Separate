@@ -1,34 +1,117 @@
-// 获取DOM元素
 const uploadBox = document.getElementById('uploadBox');
 const fileInput = document.getElementById('fileInput');
 const loading = document.getElementById('loading');
+const loadingText = document.getElementById('loadingText');
 const results = document.getElementById('results');
 const error = document.getElementById('error');
 const newImageBtn = document.getElementById('newImageBtn');
+const sampleTabs = document.getElementById('sampleTabs');
 
-// 缓存当前上传的文件
-let currentFile = null;
-
-// AbortController 用于取消请求
+let allSamplesData = [];
+let currentSampleIndex = 0;
 let currentAbortController = null;
+let currentFiles = null; // 保存当前上传的文件
+let lastAppliedParams = { grid_size: 20, white_threshold: 200, min_saturation: 30 }; // 最后应用的参数
 
-// 点击上传区域
+// 参数控制元素
+const gridSizeSlider = document.getElementById('gridSize');
+const whiteThresholdSlider = document.getElementById('whiteThreshold');
+const minSaturationSlider = document.getElementById('minSaturation');
+const gridSizeValue = document.getElementById('gridSizeValue');
+const whiteThresholdValue = document.getElementById('whiteThresholdValue');
+const minSaturationValue = document.getElementById('minSaturationValue');
+const applyParamsBtn = document.getElementById('applyParams');
+const paramStatus = document.getElementById('paramStatus');
+
+// 检查参数是否变化
+function checkParamsChanged() {
+    const current = getParams();
+    const changed = current.grid_size !== lastAppliedParams.grid_size ||
+                   current.white_threshold !== lastAppliedParams.white_threshold ||
+                   current.min_saturation !== lastAppliedParams.min_saturation;
+
+    applyParamsBtn.disabled = !changed || !currentFiles;
+    return changed;
+}
+
+// 参数滑块实时值显示和变化检测
+gridSizeSlider.addEventListener('input', (e) => {
+    gridSizeValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+whiteThresholdSlider.addEventListener('input', (e) => {
+    whiteThresholdValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+minSaturationSlider.addEventListener('input', (e) => {
+    minSaturationValue.textContent = e.target.value;
+    checkParamsChanged();
+});
+
+// 重置参数到默认值
+function resetParams() {
+    gridSizeSlider.value = 20;
+    whiteThresholdSlider.value = 200;
+    minSaturationSlider.value = 30;
+
+    gridSizeValue.textContent = '20';
+    whiteThresholdValue.textContent = '200';
+    minSaturationValue.textContent = '30';
+
+    checkParamsChanged();
+}
+
+// 获取当前参数值
+function getParams() {
+    return {
+        grid_size: parseInt(gridSizeSlider.value),
+        white_threshold: parseInt(whiteThresholdSlider.value),
+        min_saturation: parseInt(minSaturationSlider.value)
+    };
+}
+
+// 显示参数状态
+function showParamStatus(message, type) {
+    paramStatus.textContent = message;
+    paramStatus.className = 'param-status show ' + type;
+
+    if (type !== 'processing') {
+        setTimeout(() => {
+            paramStatus.className = 'param-status';
+        }, 3000);
+    }
+}
+
+// 应用参数：重新处理当前文件
+async function applyParams() {
+    if (!currentFiles) {
+        showParamStatus('没有可处理的文件', 'error');
+        return;
+    }
+
+    console.log('应用新参数并重新处理...');
+    showParamStatus('正在应用新参数...', 'processing');
+    applyParamsBtn.disabled = true;
+
+    await handleFiles(currentFiles);
+
+    lastAppliedParams = getParams();
+    checkParamsChanged();
+}
 uploadBox.addEventListener('click', () => {
     fileInput.click();
 });
 
-// 文件选择
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        const newFile = e.target.files[0];
-        console.log('选择了新文件:', newFile.name);
-        currentFile = newFile;
-        handleFile(currentFile);
+        const files = Array.from(e.target.files);
+        console.log(`选择了 ${files.length} 个文件:`, files.map(f => f.name));
+        handleFiles(files);
     }
 });
 
-
-// 拖拽上传
 uploadBox.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadBox.classList.add('dragover');
@@ -43,51 +126,69 @@ uploadBox.addEventListener('drop', (e) => {
     uploadBox.classList.remove('dragover');
 
     if (e.dataTransfer.files.length > 0) {
-        currentFile = e.dataTransfer.files[0];
-        handleFile(currentFile);
+        const files = Array.from(e.dataTransfer.files);
+        handleFiles(files);
     }
 });
 
-// 处理文件
-async function handleFile(file) {
-    console.log('handleFile 被调用，文件名:', file.name, '文件大小:', file.size);
+async function handleFiles(files) {
+    console.log(`handleFiles 被调用，共 ${files.length} 个文件`);
 
-    // 检查文件类型
-    if (!file.type.startsWith('image/')) {
-        showError('请上传图像文件');
+    const validFiles = files.filter(file => {
+        if (!file.type.startsWith('image/')) {
+            console.log(`跳过非图像文件: ${file.name}`);
+            return false;
+        }
+        if (file.size > 16 * 1024 * 1024) {
+            console.log(`跳过大文件 (>16MB): ${file.name}`);
+            showError(`文件 ${file.name} 大小超过16MB，已跳过`);
+            return false;
+        }
+        return true;
+    });
+
+    if (validFiles.length === 0) {
+        showError('没有有效的图像文件');
         return;
     }
 
-    // 检查文件大小（16MB）
-    if (file.size > 16 * 1024 * 1024) {
-        showError('文件大小不能超过16MB');
-        return;
-    }
+    console.log(`有效文件数: ${validFiles.length}`);
 
-    // 只有颜色分类功能
-    console.log('使用颜色分类');
+    // 保存当前文件，用于参数调整后重新处理
+    currentFiles = validFiles;
 
-    // 如果有正在进行的请求，先取消
     if (currentAbortController) {
         currentAbortController.abort();
         console.log('已取消上一次请求');
     }
 
-    // 创建新的 AbortController
     currentAbortController = new AbortController();
 
-    // 隐藏上传区和结果，显示加载中
     uploadBox.style.display = 'none';
     results.style.display = 'none';
     error.style.display = 'none';
     loading.style.display = 'block';
 
-    // 创建FormData
+    if (validFiles.length > 1) {
+        loadingText.textContent = `正在处理 ${validFiles.length} 个图像，请稍候...`;
+    } else {
+        loadingText.textContent = '正在分析图像，请稍候...';
+    }
+
     const formData = new FormData();
-    formData.append('file', file);
+    validFiles.forEach(file => {
+        formData.append('files', file);
+    });
+
+    // 添加参数
+    const params = getParams();
+    formData.append('grid_size', params.grid_size);
+    formData.append('white_threshold', params.white_threshold);
+    formData.append('min_saturation', params.min_saturation);
+
+    console.log('处理参数:', params);
 
     try {
-        // 发送请求（带取消信号）
         const response = await fetch('/upload', {
             method: 'POST',
             body: formData,
@@ -100,16 +201,29 @@ async function handleFile(file) {
             throw new Error(data.error || '处理失败');
         }
 
-        // 显示结果
-        displayResults(data);
+        allSamplesData = data.results.filter(r => r.success);
+
+        if (allSamplesData.length === 0) {
+            throw new Error('所有文件处理失败');
+        }
+
+        console.log(`成功处理 ${allSamplesData.length} 个文件`);
+
+        currentSampleIndex = 0;
+        displayAllResults();
+
+        // 更新最后应用的参数
+        lastAppliedParams = params;
+        checkParamsChanged();
+        showParamStatus('处理完成！', 'success');
 
     } catch (err) {
-        // 如果是主动取消，不显示错误
         if (err.name === 'AbortError') {
             console.log('请求已被取消');
             return;
         }
         showError(err.message);
+        showParamStatus('处理失败: ' + err.message, 'error');
         uploadBox.style.display = 'block';
     } finally {
         loading.style.display = 'none';
@@ -117,9 +231,54 @@ async function handleFile(file) {
     }
 }
 
-// 显示结果
-function displayResults(data) {
-    // 设置统计信息
+function displayAllResults() {
+    if (allSamplesData.length > 1) {
+        sampleTabs.style.display = 'flex';
+        sampleTabs.innerHTML = '';
+
+        allSamplesData.forEach((sampleData, index) => {
+            const tab = document.createElement('div');
+            tab.className = 'sample-tab';
+            if (index === currentSampleIndex) {
+                tab.classList.add('active');
+            }
+
+            tab.innerHTML = `
+                <img src="${sampleData.original}" alt="${sampleData.filename}" class="sample-tab-thumbnail" title="${sampleData.filename}">
+            `;
+
+            tab.addEventListener('click', () => {
+                switchSample(index);
+            });
+
+            sampleTabs.appendChild(tab);
+        });
+    } else {
+        sampleTabs.style.display = 'none';
+    }
+
+    displayCurrentSample();
+}
+
+function switchSample(index) {
+    if (index === currentSampleIndex) return;
+
+    currentSampleIndex = index;
+
+    document.querySelectorAll('.sample-tab').forEach((tab, i) => {
+        if (i === index) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    displayCurrentSample();
+}
+
+function displayCurrentSample() {
+    const data = allSamplesData[currentSampleIndex];
+
     let statsHtml = `
         <div class="stat-item">
             <div class="stat-number">${data.stats.color_categories}</div>
@@ -129,89 +288,129 @@ function displayResults(data) {
 
     document.getElementById('stats').innerHTML = statsHtml;
 
-    // 清空图像网格
-    const imagesGrid = document.querySelector('.images-grid');
-    imagesGrid.innerHTML = `
-        <div class="image-card">
-            <h3>原始图像</h3>
-            <img src="${data.original}" alt="原始图像">
-        </div>
-        <div class="image-card">
-            <h3>颜色分类标注</h3>
-            <img src="${data.color_annotated}" alt="颜色分类标注">
-        </div>
-    `;
+    const images = [];
 
-    // 动态添加颜色聚类图像
-    const colorClustersDiv = document.getElementById('colorClusters');
-    colorClustersDiv.innerHTML = '';
+    images.push({
+        url: data.original,
+        title: '原始图像',
+        type: 'original'
+    });
+
+    images.push({
+        url: data.white_extract,
+        title: '白色提取预处理',
+        type: 'white_extract'
+    });
+
+    images.push({
+        url: data.color_annotated,
+        title: '颜色分类标注',
+        type: 'annotated'
+    });
+
     if (data.color_clusters && data.color_clusters.length > 0) {
         data.color_clusters.forEach((clusterUrl, index) => {
-            const card = document.createElement('div');
-            card.className = 'image-card';
-
-            // 从统计信息获取颜色类别名称
             let categoryLabel = `颜色类别 ${index}`;
             if (data.stats.color_info && data.stats.color_info[index]) {
                 const info = data.stats.color_info[index];
-                categoryLabel = `${info.type === 'color' ? '彩色' : '灰度'} - ${info.name} (${info.count}个)`;
+                categoryLabel = `${info.type === 'color' ? '彩色' : '灰度'} - ${info.name}`;
             }
 
-            card.innerHTML = `
-                <h3>${categoryLabel}</h3>
-                <img src="${clusterUrl}" alt="颜色类别 ${index}">
-            `;
-            colorClustersDiv.appendChild(card);
+            images.push({
+                url: clusterUrl,
+                title: categoryLabel,
+                type: 'cluster',
+                index: index
+            });
         });
     }
 
-    // 显示结果区域
+    const thumbnailList = document.getElementById('thumbnailList');
+    thumbnailList.innerHTML = '';
+
+    images.forEach((img, index) => {
+        const thumbnailItem = document.createElement('div');
+        thumbnailItem.className = 'thumbnail-item';
+        thumbnailItem.dataset.index = index;
+
+        thumbnailItem.innerHTML = `
+            <img src="${img.url}" alt="${img.title}">
+            <div class="thumbnail-label">${img.title}</div>
+        `;
+
+        thumbnailItem.addEventListener('click', () => {
+            showMainImage(img, index);
+        });
+
+        thumbnailList.appendChild(thumbnailItem);
+    });
+
+    if (images.length > 0) {
+        showMainImage(images[0], 0);
+    }
+
     results.style.display = 'block';
 
-    // 平滑滚动到结果区域
     setTimeout(() => {
         results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
 }
 
-// 显示错误
+function showMainImage(imageData, index) {
+    const mainImage = document.getElementById('mainImage');
+    const currentImageTitle = document.getElementById('currentImageTitle');
+    const placeholder = document.querySelector('.placeholder');
+
+    currentImageTitle.textContent = imageData.title;
+
+    placeholder.style.display = 'none';
+    mainImage.style.display = 'block';
+    mainImage.src = imageData.url;
+
+    document.querySelectorAll('.thumbnail-item').forEach((item, i) => {
+        if (i === index) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
 function showError(message) {
     error.textContent = '❌ ' + message;
     error.style.display = 'block';
 
-    // 3秒后自动隐藏
     setTimeout(() => {
         error.style.display = 'none';
     }, 3000);
 }
 
-// 重置上传区
 function resetUpload() {
     console.log('resetUpload 被调用');
-    console.log('当前 currentFile:', currentFile ? currentFile.name : 'null');
 
-    // 取消可能存在的请求
     if (currentAbortController) {
         currentAbortController.abort();
         currentAbortController = null;
         console.log('已取消当前处理');
     }
 
-    // 先清空 fileInput.value，确保即使选择同一文件也能触发 change 事件
     fileInput.value = '';
-
-    // 重置状态
-    currentFile = null;
+    allSamplesData = [];
+    currentSampleIndex = 0;
+    currentFiles = null;
+    sampleTabs.style.display = 'none';
     results.style.display = 'none';
     loading.style.display = 'none';
     uploadBox.style.display = 'block';
     error.style.display = 'none';
 
-    // 平滑滚动到上传区
+    // 重置参数按钮状态
+    checkParamsChanged();
+    paramStatus.className = 'param-status';
+
     setTimeout(() => {
         uploadBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
 
-    // 触发文件选择
     fileInput.click();
 }

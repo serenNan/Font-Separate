@@ -50,4 +50,6 @@ inference/
 *.tmp
 *.bak
 *~
+截图
 .vscode
+setting.json
